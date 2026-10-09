@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+"""Convert PDFs to page-marked markdown, with OCR fallback for scanned files."""
+import sys
+
+if sys.version_info < (3, 9):
+    sys.exit("pdf2md needs Python 3.9 or newer")
+
+import argparse
+import csv
+import hashlib
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+MANIFEST_FIELDS = ["stem", "source", "sha256", "pages", "chars_per_page", "method", "md_path"]
+
+
+class ToolMissing(Exception):
+    pass
+
+
+def run(cmd):
+    """Run an external command; raise ToolMissing if the binary is absent."""
+    if shutil.which(cmd[0]) is None:
+        raise ToolMissing(f"required program '{cmd[0]}' not found on PATH")
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def pdftotext(pdf, layout=False):
+    r = run(["pdftotext"] + (["-layout"] if layout else []) + [str(pdf), "-"])
+    if r.returncode != 0:
+        lines = [l for l in r.stderr.splitlines() if l.strip()]
+        why = lines[-1].strip() if lines else f"exit {r.returncode}"
+        raise RuntimeError(f"{pdf} is not a readable PDF (pdftotext: {why})")
+    pages = r.stdout.split("\f")
+    if pages and not pages[-1].strip():
+        pages.pop()
+    return pages
+
+
+def is_encrypted(pdf):
+    try:
+        return run(["qpdf", "--is-encrypted", str(pdf)]).returncode == 0
+    except ToolMissing:
+        return False
+
+
+def mean_chars(pages):
+    return sum(len(p.strip()) for p in pages) / len(pages) if pages else 0.0
+
+
+def docling_pages(pdf):
+    from docling.document_converter import DocumentConverter  # optional
+    md = DocumentConverter().convert(str(pdf)).document.export_to_markdown()
+    return [md]
+
+
+def convert(pdf, threshold=200, engine="auto", tmp=None, layout=False):
+    """Return (pages, method)."""
+    work = Path(tmp)
+    src = Path(pdf)
+    method = []
+    if is_encrypted(src):
+        dec = work / "decrypted.pdf"
+        r = run(["qpdf", "--decrypt", str(src), str(dec)])
+        if r.returncode not in (0, 3) or not dec.exists():
+            raise RuntimeError(f"qpdf could not decrypt {pdf}: {r.stderr.strip()}")
+        src = dec
+        method.append("qpdf")
+    if engine == "docling":
+        try:
+            pages = docling_pages(src)
+        except ImportError:
+            raise ToolMissing("--engine docling requested but docling is not importable")
+        return pages, "+".join(method + ["docling"])
+    pages = pdftotext(src, layout)
+    method.append("pdftotext-layout" if layout else "pdftotext")
+    if mean_chars(pages) < threshold:
+        ocr = work / "ocr.pdf"
+        r = run(["ocrmypdf", "--skip-text", str(src), str(ocr)])
+        if r.returncode != 0:
+            raise RuntimeError(f"ocrmypdf failed on {pdf}: {r.stderr.strip()}")
+        pages = pdftotext(ocr, layout)
+        method.append("ocr")
+    return pages, "+".join(method)
+
+
+def render(pdf, digest, pages, method):
+    cpp = round(mean_chars(pages), 1)
+    head = ["---", f"source: {Path(pdf).name}", f"sha256: {digest}", f"pages: {len(pages)}",
+            f"chars_per_page: {cpp}", f"method: {method}", "---", ""]
+    body = [f"<!-- page {i} -->\n{p.strip()}\n" for i, p in enumerate(pages, 1)]
+    return "\n".join(head) + "\n".join(body), cpp
+
+
+def append_manifest(manifest, row):
+    new = not manifest.exists()
+    with open(manifest, "a", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=MANIFEST_FIELDS)
+        if new:
+            w.writeheader()
+        w.writerow(row)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, epilog=(
+        "Requires: python3 >= 3.9, pdftotext (poppler). Optional: ocrmypdf (scans), qpdf (encrypted), docling."))
+    ap.add_argument("pdfs", nargs="+")
+    ap.add_argument("--out", default="02_sources/md")
+    ap.add_argument("--threshold", type=int, default=200, help="min mean chars/page before OCR")
+    ap.add_argument("--engine", choices=["auto", "docling"], default="auto")
+    ap.add_argument("--layout", action="store_true", help="use pdftotext -layout (default: reading order)")
+    ap.add_argument("--force", action="store_true", help="overwrite existing conversions")
+    a = ap.parse_args(argv)
+    out = Path(a.out)
+    out.mkdir(parents=True, exist_ok=True)
+    manifest = out.parent / "manifest.csv"
+    status = 0
+    for p in a.pdfs:
+        pdf = Path(p)
+        dest = out / f"{pdf.stem}.md"
+        if not pdf.is_file():
+            print(f"error: {pdf} not found", file=sys.stderr)
+            status = 1
+            continue
+        if dest.exists() and not a.force:
+            print(f"skip: {dest} exists (use --force to overwrite)")
+            continue
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                pages, method = convert(pdf, a.threshold, a.engine, tmp, a.layout)
+        except ToolMissing as e:
+            print(f"error: {e}", file=sys.stderr)
+            status = 1
+            continue
+        except RuntimeError as e:
+            print(f"error: {e}", file=sys.stderr)
+            status = 1
+            continue
+        digest = sha256(pdf)
+        text, cpp = render(pdf, digest, pages, method)
+        dest.write_text(text)
+        append_manifest(manifest, {"stem": pdf.stem, "source": str(pdf), "sha256": digest,
+                                   "pages": len(pages), "chars_per_page": cpp,
+                                   "method": method, "md_path": str(dest)})
+        print(f"ok: {dest} ({len(pages)} pages, {method})")
+    return status
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""Check that every cited sentence in a draft has a literature note with claims or quotes.
+
+Usage: check-claims <draft.md>
+
+Finds sentences carrying a pandoc citation ([@key], [@a; @b], [@key, 12]) and maps each key
+to 01_notes/lit/<key>.md (looked up from the draft's directory upwards, then the current
+directory). Prints a markdown table with one row per (sentence, key):
+  UNSUPPORTED  no note for the key
+  THIN         note exists but lists no claim and no quote
+  OK           note lists at least one claim or quote
+Exits 1 if any row is not OK, 2 on usage error. No model calls, no network.
+"""
+from __future__ import annotations
+
+import sys
+
+if sys.version_info < (3, 9):
+    sys.exit("check-claims needs Python 3.9 or newer")
+
+import re
+from pathlib import Path
+
+CITE_RE = re.compile(r"\[[^\[\]]*@[^\[\]]*\]")
+KEY_RE = re.compile(r"(?<![\w@])-?@([A-Za-z0-9_][\w:.#$%&+?<>~/-]*)")
+
+
+def note_dir(draft: Path) -> Path | None:
+    for base in [draft.resolve().parent, *draft.resolve().parent.parents, Path.cwd()]:
+        if (base / "01_notes/lit").is_dir():
+            return base / "01_notes/lit"
+    return None
+
+
+def note_status(path: Path) -> str:
+    """OK if the front matter has a non-empty claims or quotes list, else THIN."""
+    if not path.is_file():
+        return "UNSUPPORTED"
+    text = path.read_text(encoding="utf-8", errors="replace")
+    m = re.match(r"---\s*\n(.*?)\n---\s*(\n|$)", text, re.S)
+    if not m:
+        return "THIN"
+    section = None
+    for line in m.group(1).splitlines():
+        if line.strip() and not line.startswith((" ", "\t", "-")):
+            key, _, val = line.partition(":")
+            section = key.strip() if key.strip() in ("claims", "quotes") else None
+            inline = val.split("#")[0].strip()
+            if section and inline not in ("", "[]"):
+                return "OK"
+        elif section and line.strip().startswith("- ") and line.strip()[2:].strip():
+            return "OK"
+    return "THIN"
+
+
+def cited_sentences(text: str) -> list[tuple[int, str, list[str]]]:
+    """(line number, sentence, keys) for each sentence with a citation."""
+    out = []
+    for n, para in _paragraphs(text):
+        masked = CITE_RE.sub(lambda m: m.group(0).replace(".", "\x00"), para)
+        for s in re.split(r"(?<=[.!?])\s+", masked):
+            s = s.replace("\x00", ".").strip()
+            keys: list[str] = []
+            for c in CITE_RE.findall(s):
+                for k in KEY_RE.findall(c):
+                    k = k.rstrip(".:;,")
+                    if k and k not in keys:
+                        keys.append(k)
+            if keys:
+                out.append((n, s, keys))
+    return out
+
+
+def _paragraphs(text: str):
+    start, buf = 1, []
+    for i, line in enumerate(text.splitlines(), 1):
+        if line.strip():
+            if not buf:
+                start = i
+            buf.append(line.strip())
+        elif buf:
+            yield start, " ".join(buf)
+            buf = []
+    if buf:
+        yield start, " ".join(buf)
+
+
+def main(argv: list[str]) -> int:
+    if any(a in ("-h", "--help") for a in argv[1:]):
+        print(__doc__ + "Requires: python3 >= 3.9 (stdlib only).")
+        return 0
+    if len(argv) != 2:
+        print("usage: check-claims <draft.md>", file=sys.stderr)
+        return 2
+    draft = Path(argv[1])
+    try:
+        text = draft.read_text(encoding="utf-8")
+    except OSError as e:
+        print(f"check-claims: cannot read draft: {e}", file=sys.stderr)
+        return 2
+    notes = note_dir(draft)
+    print("| line | key | status | sentence |\n|---|---|---|---|")
+    bad = 0
+    rows = cited_sentences(text)
+    for n, sent, keys in rows:
+        for k in keys:
+            st = note_status(notes / f"{k}.md") if notes else "UNSUPPORTED"
+            bad += st != "OK"
+            short = sent if len(sent) <= 100 else sent[:97] + "..."
+            print(f"| {n} | {k} | {st} | {short.replace('|', '/')} |")
+    print(f"\n{len(rows)} cited sentence(s); {bad} row(s) not OK.")
+    return 1 if bad else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

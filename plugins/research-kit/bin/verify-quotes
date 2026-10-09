@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""Verify that every quote in literature notes appears verbatim in its source markdown.
+
+Usage: verify-quotes <note.md...>
+
+A note has YAML-style front matter with `source_md: <path>` and a `quotes:` list of
+items with `page` and `text`. The source md carries page markers `<!-- page N -->`.
+A quote passes when it occurs on its pinned page after normalising whitespace,
+line-break hyphenation and typographic quotes/dashes. Prints PASS/FAIL per quote;
+exits 1 on any FAIL, 2 on usage error.
+"""
+from __future__ import annotations
+
+import sys
+
+if sys.version_info < (3, 9):
+    sys.exit("verify-quotes needs Python 3.9 or newer")
+
+import json
+import re
+from pathlib import Path
+
+PAGE_RE = re.compile(r"<!--\s*page\s+(\d+)\s*-->")
+TRANS = str.maketrans({"‘": "'", "’": "'", "“": '"', "”": '"',
+                       "–": "-", "—": "-", " ": " ", "­": ""})
+
+
+def _ws(s: str) -> str:
+    return re.sub(r"\s+", " ", s.translate(TRANS)).strip()
+
+
+def variants(s: str) -> set[str]:
+    """Normalised forms: line-break hyphen dropped, or kept as a real hyphen."""
+    s = s.translate(TRANS)
+    return {_ws(re.sub(r"(?<=\w)-[ \t]*\n\s*(?=\w)", repl, s)) for repl in ("", "-")}
+
+
+def split_pages(text: str) -> dict[int, str]:
+    parts = PAGE_RE.split(text)
+    return {int(parts[i]): parts[i + 1] for i in range(1, len(parts) - 1, 2)}
+
+
+def _scalar(v: str):
+    v = v.strip()
+    if v.startswith('"') or v.startswith("'"):
+        try:
+            return json.loads(v) if v[0] == '"' else v[1:-1].replace("''", "'")
+        except ValueError:
+            return v.strip("\"'")
+    return v
+
+
+def parse_note(text: str) -> tuple[dict, list[dict]]:
+    m = re.match(r"---\s*\n(.*?)\n---\s*(\n|$)", text, re.S)
+    if not m:
+        raise ValueError("no front matter")
+    meta: dict = {}
+    quotes: list[dict] = []
+    in_quotes = False
+    cur = None
+    for line in m.group(1).splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line.startswith((" ", "\t", "-")):
+            key, _, val = line.partition(":")
+            in_quotes = key.strip() == "quotes"
+            if not in_quotes:
+                meta[key.strip()] = _scalar(val)
+            continue
+        if not in_quotes:
+            continue
+        body = line.strip()
+        if body.startswith("- "):
+            cur = {}
+            quotes.append(cur)
+            body = body[2:]
+        if cur is not None and ":" in body:
+            k, _, v = body.partition(":")
+            cur[k.strip()] = _scalar(v)
+    return meta, quotes
+
+
+def find_source(note: Path, ref: str) -> Path | None:
+    p = Path(ref)
+    if p.is_absolute():
+        return p if p.is_file() else None
+    for base in (note.resolve().parent.parent.parent, note.resolve().parent, Path.cwd()):
+        if (base / p).is_file():
+            return base / p
+    return None
+
+
+def check_note(note: Path) -> list[tuple[bool, str]]:
+    name = note.name
+    try:
+        meta, quotes = parse_note(note.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        return [(False, f"{name}: cannot read note ({e})")]
+    if not quotes:
+        return [(True, f"{name}: no quotes")]
+    src = find_source(note, str(meta.get("source_md", "")))
+    if src is None:
+        return [(False, f"{name}: quote {i}: source_md not found: {meta.get('source_md')!r}")
+                for i, _ in enumerate(quotes, 1)]
+    pages = {n: variants(t) for n, t in split_pages(src.read_text(encoding="utf-8")).items()}
+    out = []
+    for i, q in enumerate(quotes, 1):
+        text, page = str(q.get("text", "")), str(q.get("page", "")).strip()
+        want = _ws(text)
+        label = f"{name}: quote {i} (p. {page})"
+        if not want:
+            out.append((False, f"{label}: empty quote"))
+        elif not page.isdigit() or int(page) not in pages:
+            out.append((False, f"{label}: page {page!r} not found in source"))
+        elif any(want in v for v in pages[int(page)]):
+            out.append((True, label))
+        elif any(want in v for n, vs in pages.items() for v in vs):
+            out.append((False, f"{label}: text found on a different page"))
+        else:
+            out.append((False, f"{label}: text not found in source"))
+    return out
+
+
+def main(argv: list[str]) -> int:
+    if any(a in ("-h", "--help") for a in argv[1:]):
+        print(__doc__ + "Requires: python3 >= 3.9 (stdlib only).")
+        return 0
+    if len(argv) < 2:
+        print("usage: verify-quotes <note.md...>", file=sys.stderr)
+        return 2
+    ok = True
+    for a in argv[1:]:
+        for passed, msg in check_note(Path(a)):
+            print(("PASS " if passed else "FAIL ") + msg)
+            ok &= passed
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

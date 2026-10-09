@@ -1,0 +1,12 @@
+{
+  "name": "research-kit",
+  "owner": { "name": "Nik Khosravipour", "url": "https://github.com/nik110403" },
+  "metadata": { "description": "Skills, agents and tools for source-grounded research projects." },
+  "plugins": [
+    {
+      "name": "research-kit",
+      "source": "./plugins/research-kit",
+      "description": "Skills, agents and tools for source-grounded research projects."
+    }
+  ]
+}

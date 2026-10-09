@@ -1,0 +1,3 @@
+stem,source,sha256,pages,chars_per_page,method,md_path
+kireyev2026pricebench,examples/basic/02_sources/pdf/kireyev2026pricebench.pdf,a7769fc64ba376b6b16696fecef75330dc6b57ca7aa7f781d5796ab417facf5f,19,3712.9,pdftotext,examples/basic/02_sources/md/kireyev2026pricebench.md
+lei2023financial,examples/basic/02_sources/pdf/lei2023financial.pdf,f1349e45bc1b58023cf6c1443a07829540f017ce0cfd76c81e1584cb1c0be81b,14,3570.1,pdftotext,examples/basic/02_sources/md/lei2023financial.md

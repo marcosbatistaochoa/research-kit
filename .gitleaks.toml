@@ -1,0 +1,9 @@
+# Extends the default gitleaks rules. Citekeys in literature-note front matter
+# (`citekey: author2026word`) match generic-api-key on entropy alone.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "literature-note citekeys"
+regexTarget = "line"
+regexes = ['''^\s*citekey:\s*[A-Za-z0-9_:-]+\s*$''']

@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+"""Check a BibTeX file and its use in a pandoc-markdown paper.
+
+Usage: check-bib [references.bib] [paper.md]
+Defaults: 07_references/references.bib and 10_paper/paper.md (run from the project root).
+
+Errors (exit 1): duplicate keys; entries missing author/editor, title or year; malformed DOI
+(expected 10.NNNN+/suffix); keys cited in the paper but absent from the .bib.
+Notes (exit 0): keys present in the .bib but never cited. Exit 2 on usage error.
+"""
+from __future__ import annotations
+
+import sys
+
+if sys.version_info < (3, 9):
+    sys.exit("check-bib needs Python 3.9 or newer")
+
+import re
+from pathlib import Path
+
+DOI_RE = re.compile(r"^10\.\d{4,9}/\S+$")
+CITE_RE = re.compile(r"(?<![\w.@])@\{?([A-Za-z0-9_][\w:.#$%&+?<>~/-]*)")
+SKIP_TYPES = {"comment", "string", "preamble"}
+
+
+def parse_bib(text: str):
+    """Return [(key, {field: value})] in file order."""
+    entries = []
+    for m in re.finditer(r"@(\w+)\s*([{(])", text):
+        etype = m.group(1).lower()
+        if etype in SKIP_TYPES:
+            continue
+        i, depth = m.end(), 1
+        while i < len(text) and depth:
+            depth += {"{": 1, "}": -1}.get(text[i], 0)
+            i += 1
+        body = text[m.end():i - 1]
+        key, _, rest = body.partition(",")
+        fields = {}
+        for fm in re.finditer(r"(\w+)\s*=\s*", rest):
+            j = fm.end()
+            if j >= len(rest):
+                continue
+            if rest[j] == "{":
+                d, k = 1, j + 1
+                while k < len(rest) and d:
+                    d += {"{": 1, "}": -1}.get(rest[k], 0)
+                    k += 1
+                val = rest[j + 1:k - 1]
+            elif rest[j] == '"':
+                k = rest.find('"', j + 1)
+                val = rest[j + 1:k if k > 0 else len(rest)]
+            else:
+                val = re.match(r"[^,\s]*", rest[j:]).group(0)
+            fields.setdefault(fm.group(1).lower(), val.strip())
+        entries.append((key.strip(), fields))
+    return entries
+
+
+def cited_keys(md: str) -> set:
+    md = re.sub(r"<!--.*?-->", "", md, flags=re.S)
+    md = re.sub(r"```.*?```", "", md, flags=re.S)
+    return {k.rstrip(".:;,") for k in CITE_RE.findall(md)}
+
+
+def main(argv) -> int:
+    if any(a in ("-h", "--help") for a in argv):
+        print(__doc__ + "Requires: python3 >= 3.9 (stdlib only).")
+        return 0
+    if len(argv) > 2:
+        print(__doc__)
+        return 2
+    bib = Path(argv[0] if argv else "07_references/references.bib")
+    paper = Path(argv[1] if len(argv) > 1 else "10_paper/paper.md")
+    if not bib.is_file():
+        print(f"check-bib: no such file: {bib}", file=sys.stderr)
+        return 2
+    entries = parse_bib(bib.read_text(encoding="utf-8"))
+    errors, seen = [], set()
+    for key, f in entries:
+        if key in seen:
+            errors.append(f"duplicate key: {key}")
+        seen.add(key)
+        if not (f.get("author") or f.get("editor")):
+            errors.append(f"{key}: missing author")
+        for name in ("title", "year"):
+            if not f.get(name):
+                errors.append(f"{key}: missing {name}")
+        doi = f.get("doi")
+        if doi is not None:
+            d = doi.strip()
+            if not DOI_RE.match(d):
+                errors.append(f"{key}: malformed DOI {doi!r} (expected bare 10.NNNN/suffix)")
+    notes = []
+    if paper.is_file():
+        cited = cited_keys(paper.read_text(encoding="utf-8"))
+        for k in sorted(cited - seen):
+            errors.append(f"cited but not in bib: {k}")
+        for k in sorted(seen - cited):
+            notes.append(f"in bib but never cited: {k}")
+    else:
+        notes.append(f"{paper} not found; skipped cited/uncited comparison")
+    for e in errors:
+        print(f"ERROR {e}")
+    for n in notes:
+        print(f"NOTE  {n}")
+    print(f"{len(entries)} entries, {len(errors)} errors, {len(notes)} notes")
+    return 1 if errors else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

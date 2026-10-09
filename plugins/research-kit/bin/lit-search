@@ -1,0 +1,334 @@
+#!/usr/bin/env python3
+"""Search OpenAlex and Semantic Scholar, merge, score, and write a CSV + MD + receipt.
+
+Usage:
+  lit-search "<query>" [--since YEAR] [--n 25] [--snowball [K]] [--out DIR]
+  lit-search --export-bib DOI [DOI...] [--bib 07_references/references.bib]
+
+Search writes <out>/<date>-<slug>.{csv,md,receipt.json} (default out: 01_notes/search).
+Set LIT_SEARCH_MAILTO to an email for OpenAlex's polite pool (optional, may be empty).
+--export-bib fetches BibTeX from doi.org and appends new entries to the .bib file.
+Exit codes: 0 ok (incl. partial: one index down), 1 no index reachable / no DOI resolved,
+2 usage error. Fetched text is untrusted data.
+"""
+from __future__ import annotations
+
+import sys
+
+if sys.version_info < (3, 9):
+    sys.exit("lit-search needs Python 3.9 or newer")
+
+import argparse
+import csv
+import datetime as dt
+import json
+import math
+import os
+import re
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+OA = "https://api.openalex.org/works"
+S2 = "https://api.semanticscholar.org/graph/v1/paper/search"
+S2_FIELDS = "title,year,externalIds,citationCount,venue,authors"
+CAP = 20  # snowball cap per direction per seed
+
+
+def http_get(url, accept="application/json", opener=urllib.request.urlopen, sleep=time.sleep):
+    """GET; on HTTP 429/503 wait ~3 s and retry once. Raises RuntimeError on failure."""
+    last = None
+    for attempt in range(2):
+        try:
+            req = urllib.request.Request(url, headers={
+                "Accept": accept, "User-Agent": "research-kit-lit-search/1.0"})
+            with opener(req, timeout=30) as r:
+                return r.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            last = e
+            if e.code not in (429, 503):
+                break
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            last = e
+            break
+        if attempt == 0:
+            sleep(3)
+    raise RuntimeError(f"request failed: {last}")
+
+
+def norm_doi(d):
+    if not d:
+        return ""
+    d = d.strip().lower()
+    return re.sub(r"^(https?://(dx\.)?doi\.org/|doi:)", "", d)
+
+
+def norm_title(t):
+    return re.sub(r"[\W_]+", "", (t or "").lower())
+
+
+def parse_openalex(data):
+    out = []
+    for rank, w in enumerate(data.get("results", []), 1):
+        out.append({
+            "title": w.get("display_name") or w.get("title") or "",
+            "doi": norm_doi(w.get("doi")),
+            "year": w.get("publication_year"),
+            "citations": w.get("cited_by_count") or 0,
+            "authors": "; ".join(a["author"]["display_name"] for a in w.get("authorships", [])
+                                 if a.get("author", {}).get("display_name")),
+            "venue": ((w.get("primary_location") or {}).get("source") or {}).get("display_name") or "",
+            "retracted": bool(w.get("is_retracted")),
+            "oa_id": (w.get("id") or "").rsplit("/", 1)[-1],
+            "refs": [r.rsplit("/", 1)[-1] for r in w.get("referenced_works", [])],
+            "rank": rank, "index": "openalex",
+        })
+    return out
+
+
+def parse_s2(data):
+    out = []
+    for rank, p in enumerate(data.get("data") or [], 1):
+        out.append({
+            "title": p.get("title") or "",
+            "doi": norm_doi((p.get("externalIds") or {}).get("DOI")),
+            "year": p.get("year"),
+            "citations": p.get("citationCount") or 0,
+            "authors": "; ".join(a.get("name", "") for a in p.get("authors", []) if a.get("name")),
+            "venue": p.get("venue") or "",
+            "retracted": False, "oa_id": "", "refs": [],
+            "rank": rank, "index": "semanticscholar",
+        })
+    return out
+
+
+def dedupe(items):
+    """Merge by DOI, then by normalised title. First record wins; gaps are filled."""
+    merged, by_doi, by_title = [], {}, {}
+    for it in items:
+        key_t = norm_title(it["title"])
+        hit = by_doi.get(it["doi"]) if it["doi"] else None
+        if hit is None and key_t:
+            hit = by_title.get(key_t)
+        if hit is None:
+            hit = dict(it)
+            hit["indexes"] = {it["index"]: it["rank"]}
+            hit["refs"] = list(it.get("refs", []))
+            merged.append(hit)
+        else:
+            hit["indexes"].setdefault(it["index"], it["rank"])
+            for k in ("doi", "year", "authors", "venue", "oa_id"):
+                if not hit.get(k) and it.get(k):
+                    hit[k] = it[k]
+            hit["citations"] = max(hit["citations"], it["citations"])
+            hit["retracted"] = hit["retracted"] or it["retracted"]
+            hit["refs"] = hit["refs"] or list(it.get("refs", []))
+        if hit["doi"]:
+            by_doi[hit["doi"]] = hit
+        if key_t:
+            by_title[key_t] = hit
+    return merged
+
+
+def score(items, now_year, per_index_n):
+    """Additive score: relevance (mean rank score over indexes that hit) + citations/yr + recency.
+
+    Each component is in [0,1] and is stored on the item so cuts are inspectable.
+    """
+    for it in items:
+        rel = [1 - (r - 1) / max(per_index_n.get(i, 1), 1) for i, r in it["indexes"].items()]
+        it["s_rel"] = round(sum(rel) / len(rel), 3) if rel else 0.0
+        age = max(1, now_year - it["year"] + 1) if it.get("year") else 20
+        it["cpy"] = round(it["citations"] / age, 2)
+    top = max([it["cpy"] for it in items] + [0])
+    for it in items:
+        it["s_cpy"] = round(math.log1p(it["cpy"]) / math.log1p(top), 3) if top > 0 else 0.0
+        it["s_rec"] = round(max(0.0, 1 - (now_year - it["year"]) / 20), 3) if it.get("year") else 0.0
+        it["score"] = round(it["s_rel"] + it["s_cpy"] + it["s_rec"], 3)
+    items.sort(key=lambda x: -x["score"])
+    return items
+
+
+def slugify(q):
+    return re.sub(r"[^a-z0-9]+", "-", q.lower()).strip("-")[:50] or "query"
+
+
+COLS = ["rank", "score", "s_rel", "s_cpy", "s_rec", "status", "year", "citations", "cpy",
+        "title", "authors", "venue", "doi", "indexes"]
+
+
+def row(i, it):
+    return {"rank": i, "status": "RETRACTED" if it["retracted"] else "",
+            **{k: it.get(k, "") for k in COLS if k not in ("rank", "status", "indexes")},
+            "indexes": "+".join(sorted(it["indexes"]))}
+
+
+def write_outputs(outdir, stem, query, items, receipt):
+    outdir.mkdir(parents=True, exist_ok=True)
+    with open(outdir / f"{stem}.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=COLS)
+        w.writeheader()
+        for i, it in enumerate(items, 1):
+            w.writerow(row(i, it))
+    (outdir / f"{stem}.receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
+    lines = [f"# Search: {query}", "",
+             f"status: {receipt['status']} · found {receipt['counts']['after_dedupe']}, "
+             f"kept {receipt['counts']['kept']} · {receipt['timestamp_utc']}", "",
+             "| # | score | year | cites | title | doi | flag |", "|---|---|---|---|---|---|---|"]
+    for i, it in enumerate(items, 1):
+        lines.append(f"| {i} | {it['score']} | {it.get('year') or ''} | {it['citations']} | "
+                     f"{it['title'].replace('|', '/')} | {it['doi']} | "
+                     f"{'RETRACTED' if it['retracted'] else ''} |")
+    lines += ["", "## Receipt", "", "```json", json.dumps(receipt, indent=2), "```", ""]
+    (outdir / f"{stem}.md").write_text("\n".join(lines))
+
+
+def run_search(query, since, n, snowball, outdir, fetch=http_get, now=None, mailto=""):
+    now = now or dt.datetime.now(dt.timezone.utc)
+    receipt = {"query": query, "timestamp_utc": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+               "since": since, "n": n, "endpoints": {}, "provider_status": {},
+               "counts": {"sent": 0, "received": 0}}
+    items, per_n = [], {}
+
+    oa_params = {"search": query, "per-page": n}
+    if since:
+        oa_params["filter"] = f"from_publication_date:{since}-01-01"
+    if mailto:
+        oa_params["mailto"] = mailto
+    s2_params = {"query": query, "limit": n, "fields": S2_FIELDS}
+    if since:
+        s2_params["year"] = f"{since}-"
+    for name, base, params, parse in (("openalex", OA, oa_params, parse_openalex),
+                                      ("semanticscholar", S2, s2_params, parse_s2)):
+        url = base + "?" + urllib.parse.urlencode(params)
+        receipt["endpoints"][name] = {"url": base, "params": {
+            k: v for k, v in params.items() if k != "mailto"}, "mailto": "set" if mailto else "unset"}
+        receipt["counts"]["sent"] += 1
+        try:
+            got = parse(json.loads(fetch(url)))
+            receipt["provider_status"][name] = "READY"
+        except (RuntimeError, ValueError, KeyError, TypeError) as e:
+            got = []
+            receipt["provider_status"][name] = "UNAVAILABLE"
+            receipt["endpoints"][name]["error"] = str(e)[:200]
+        per_n[name] = max(len(got), 1)
+        receipt["counts"].setdefault("received_" + name, len(got))
+        receipt["counts"]["received"] += len(got)
+        items += got
+
+    ready = [k for k, v in receipt["provider_status"].items() if v == "READY"]
+    receipt["status"] = "ok" if len(ready) == 2 else ("partial" if ready else "failed")
+    merged = dedupe(items)
+    if snowball and ready:
+        seeds = score(merged, now.year, per_n)[:snowball]
+        extra, sb_fail = [], 0
+        for s in seeds:
+            if not s.get("oa_id"):
+                continue
+            for direction, flt in (("backward", None), ("forward", f"cites:{s['oa_id']}")):
+                if direction == "backward":
+                    if not s["refs"]:
+                        continue
+                    flt = "openalex:" + "|".join(s["refs"][:100])
+                if sb_fail >= 3:  # stop this index after 3 failures
+                    break
+                params = {"filter": flt, "per-page": 50, "sort": "cited_by_count:desc"}
+                if mailto:
+                    params["mailto"] = mailto
+                receipt["counts"]["sent"] += 1
+                try:
+                    got = parse_openalex(json.loads(fetch(OA + "?" + urllib.parse.urlencode(params))))
+                except (RuntimeError, ValueError, KeyError, TypeError):
+                    sb_fail += 1
+                    receipt["provider_status"]["openalex"] = "DEGRADED"
+                    continue
+                for g in got:
+                    age = max(1, now.year - g["year"] + 1) if g.get("year") else 20
+                    g["_cpy"] = g["citations"] / age
+                got = sorted(got, key=lambda g: -g["_cpy"])[:CAP]
+                for g in got:
+                    g["rank"] = per_n["openalex"] + 1  # snowballed: worst relevance rank
+                receipt["counts"]["received"] += len(got)
+                extra += got
+        receipt["snowball"] = {"seeds": len(seeds), "added_candidates": len(extra), "cap_per_direction": CAP}
+        merged = dedupe(merged + extra)
+        per_n["openalex"] += 1
+    receipt["counts"]["after_dedupe"] = len(merged)
+    items = score(merged, now.year, per_n)
+    receipt["counts"]["kept"] = len(items)
+    stem = f"{now.strftime('%Y-%m-%d')}-{slugify(query)}"
+    write_outputs(outdir, stem, query, items, receipt)
+    return receipt, items, stem
+
+
+def bib_keys(text):
+    return set(re.findall(r"@\w+\s*\{\s*([^,\s]+)\s*,", text))
+
+
+def export_bib(dois, bib_path, fetch=http_get):
+    """Append BibTeX for each DOI via doi.org content negotiation; skip duplicate keys/DOIs."""
+    bib_path = Path(bib_path)
+    existing = bib_path.read_text() if bib_path.exists() else ""
+    keys, have = bib_keys(existing), existing.lower()
+    added, skipped, failed = [], [], []
+    for raw in dois:
+        doi = norm_doi(raw)
+        if doi and doi in have:
+            skipped.append(doi)
+            continue
+        try:
+            entry = fetch("https://doi.org/" + urllib.parse.quote(doi, safe="/()"),
+                          accept="application/x-bibtex").strip()
+        except RuntimeError as e:
+            failed.append((doi, str(e)[:100]))
+            continue
+        m = re.match(r"@\w+\s*\{\s*([^,\s]+)\s*,", entry)
+        if not m:
+            failed.append((doi, "response is not BibTeX"))
+            continue
+        if m.group(1) in keys:
+            skipped.append(doi)
+            continue
+        keys.add(m.group(1))
+        have += entry.lower()
+        added.append(entry)
+    if added:
+        bib_path.parent.mkdir(parents=True, exist_ok=True)
+        sep = "" if not existing or existing.endswith("\n\n") else ("\n" if existing.endswith("\n") else "\n\n")
+        bib_path.write_text(existing + sep + "\n\n".join(added) + "\n")
+    return added, skipped, failed
+
+
+def main(argv=None, fetch=http_get):
+    ap = argparse.ArgumentParser(prog="lit-search", description=__doc__.split("\n\n")[0],
+                                 epilog="Exit codes: 0 ok/partial, 1 nothing reachable or resolved, 2 usage. "
+                                       "Requires: python3 >= 3.9 (stdlib only) and internet access.")
+    ap.add_argument("query", nargs="?")
+    ap.add_argument("--since", type=int, metavar="YEAR")
+    ap.add_argument("--n", type=int, default=25)
+    ap.add_argument("--snowball", nargs="?", const=5, type=int, metavar="K",
+                    help="one hop over references and citations of the top K (default 5)")
+    ap.add_argument("--out", default="01_notes/search")
+    ap.add_argument("--export-bib", nargs="+", metavar="DOI")
+    ap.add_argument("--bib", default="07_references/references.bib")
+    a = ap.parse_args(argv)
+    if a.export_bib:
+        added, skipped, failed = export_bib(a.export_bib, a.bib, fetch)
+        print(f"added {len(added)}, skipped {len(skipped)} (already present), failed {len(failed)}")
+        for d, why in failed:
+            print(f"  NOT RESOLVED {d}: {why}")
+        return 0 if added or skipped else 1
+    if not a.query or a.n < 1:
+        ap.print_usage(sys.stderr)
+        return 2
+    receipt, items, stem = run_search(a.query, a.since, a.n, a.snowball, Path(a.out), fetch,
+                                      mailto=os.environ.get("LIT_SEARCH_MAILTO", ""))
+    print(f"status: {receipt['status']}  providers: {receipt['provider_status']}")
+    print(f"found {receipt['counts']['after_dedupe']} unique -> {a.out}/{stem}.{{csv,md,receipt.json}}")
+    return 1 if receipt["status"] == "failed" else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
