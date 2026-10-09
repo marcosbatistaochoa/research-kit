@@ -17,10 +17,10 @@ class CheckClaims(unittest.TestCase):
             root = Path(t)
             (root / "01_notes/lit").mkdir(parents=True)
             for k, body in notes.items():
-                (root / f"01_notes/lit/{k}.md").write_text(body.format(k=k))
-            (root / "10_draft.md").write_text(draft)
+                (root / f"01_notes/lit/{k}.md").write_text(body.format(k=k), encoding="utf-8")
+            (root / "10_draft.md").write_text(draft, encoding="utf-8")
             return subprocess.run([sys.executable, str(TOOL), str(root / "10_draft.md")],
-                                  capture_output=True, text=True)
+                                  capture_output=True, text=True, encoding="utf-8", errors="replace")
 
     def row(self, r, key):
         return next(l for l in r.stdout.splitlines() if f"| {key} |" in l)
@@ -50,7 +50,7 @@ class CheckClaims(unittest.TestCase):
         self.assertIn("1 cited sentence(s)", r.stdout)
 
     def test_usage(self):
-        r = subprocess.run([sys.executable, str(TOOL)], capture_output=True, text=True)
+        r = subprocess.run([sys.executable, str(TOOL)], capture_output=True, text=True, encoding="utf-8", errors="replace")
         self.assertEqual(r.returncode, 2)
 
 

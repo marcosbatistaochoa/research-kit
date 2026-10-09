@@ -1,3 +1,4 @@
+import sys
 import shutil
 import subprocess
 import tempfile
@@ -11,6 +12,7 @@ TEMPLATE = ROOT / "plugins/research-kit/templates/project"
 BIB = "@article{a2020x, author={Doe, Jane}, title={Title}, journal={J}, year={2020}}\n"
 
 
+@unittest.skipIf(sys.platform == "win32", "build-paper is a POSIX sh script")
 @unittest.skipUnless(shutil.which("pandoc"), "pandoc not installed")
 class BuildPaper(unittest.TestCase):
     def project(self, paper):
@@ -18,13 +20,13 @@ class BuildPaper(unittest.TestCase):
         self.addCleanup(t.cleanup)
         root = Path(t.name) / "p"
         shutil.copytree(TEMPLATE, root)
-        (root / "07_references/references.bib").write_text(BIB)
+        (root / "07_references/references.bib").write_text(BIB, encoding="utf-8")
         if paper is not None:
-            (root / "10_paper/paper.md").write_text(paper)
+            (root / "10_paper/paper.md").write_text(paper, encoding="utf-8")
         return root
 
     def build(self, root, *args):
-        return subprocess.run(["sh", str(TOOL), *args], cwd=root, capture_output=True, text=True)
+        return subprocess.run(["sh", str(TOOL), *args], cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace")
 
     def out(self, root):
         return list((root / "10_paper").glob("paper.pdf")) + list((root / "10_paper").glob("paper.html"))

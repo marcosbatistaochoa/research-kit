@@ -15,3 +15,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: sudo apt-get update && sudo apt-get install -y poppler-utils pandoc
       - run: make check
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: choco install -y poppler pandoc
+        continue-on-error: true  # tests that need these tools skip when absent
+      - run: python -m unittest discover -s tests -v

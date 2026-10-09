@@ -32,12 +32,12 @@ class VerifyQuotes(unittest.TestCase):
             root = Path(t)
             if source_text is not None:
                 (root / "02_sources/md").mkdir(parents=True)
-                (root / "02_sources/md/a.md").write_text(source_text)
+                (root / "02_sources/md/a.md").write_text(source_text, encoding="utf-8")
             (root / "01_notes/lit").mkdir(parents=True)
             n = root / "01_notes/lit/a.md"
-            n.write_text(note(quotes, source_ref))
+            n.write_text(note(quotes, source_ref), encoding="utf-8")
             return subprocess.run([sys.executable, str(TOOL), str(n)],
-                                  capture_output=True, text=True)
+                                  capture_output=True, text=True, encoding="utf-8", errors="replace")
 
     def test_exact_match(self):
         r = self.run_note([(2, "a monetary phenomenon")])
@@ -75,7 +75,7 @@ class VerifyQuotes(unittest.TestCase):
         self.assertIn("FAIL", r.stdout)
 
     def test_usage(self):
-        r = subprocess.run([sys.executable, str(TOOL)], capture_output=True, text=True)
+        r = subprocess.run([sys.executable, str(TOOL)], capture_output=True, text=True, encoding="utf-8", errors="replace")
         self.assertEqual(r.returncode, 2)
 
 

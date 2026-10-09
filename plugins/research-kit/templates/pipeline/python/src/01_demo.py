@@ -9,7 +9,7 @@ OUT = Path(__file__).resolve().parent.parent / "output" / "tables"
 ROWS = [("a", 1), ("b", 2), ("c", 3)]
 
 OUT.mkdir(parents=True, exist_ok=True)
-with open(OUT / "demo_sum.csv", "w", newline="") as f:
+with open(OUT / "demo_sum.csv", "w", newline="", encoding="utf-8") as f:
     w = csv.writer(f)
     w.writerow(["key", "value"])
     w.writerows(ROWS)

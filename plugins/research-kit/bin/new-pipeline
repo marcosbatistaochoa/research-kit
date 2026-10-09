@@ -24,6 +24,11 @@ def create(target: Path, lang: str) -> None:
 
 
 def main(argv: list) -> int:
+    for _s in (sys.stdout, sys.stderr):  # UTF-8 output regardless of the locale (e.g. Windows cp1252)
+        try:
+            _s.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError, OSError):
+            pass
     usage = "usage: new-pipeline <target-dir> --lang python|r"
     if any(a in ("-h", "--help") for a in argv[1:]):
         print(__doc__ + "Requires: python3 >= 3.9 (stdlib only).")

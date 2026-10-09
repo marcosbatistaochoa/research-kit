@@ -16,7 +16,7 @@ noted; `build-paper` is a POSIX shell script.
 |---|---|---|---|
 | scaffold | `plugins/research-kit/bin/new-project` | Every project starts with a different folder layout | Copy `bin/new-project` and `templates/project/` side by side (it finds the template next to itself); run `new-project my-paper` |
 | scaffold | `skills/new-research-project` | Asking Claude to start a project | Copy the folder into `.claude/skills/`; needs `new-project` on PATH |
-| search | `bin/lit-search` | Searching two indexes, deduping, ranking, spotting retracted papers, getting BibTeX | Copy onto PATH; needs internet (OpenAlex, Semantic Scholar, doi.org), no API keys |
+| search | `bin/lit-search` | Searching two indexes, deduping, ranking, spotting retracted papers, getting BibTeX | Copy onto PATH; needs internet (OpenAlex, Semantic Scholar, doi.org). Without a Semantic Scholar API key its requests are often refused (HTTP 429/403) and search falls back to OpenAlex only; set `SEMANTIC_SCHOLAR_API_KEY` to send one (never written to the receipt) |
 | search | `skills/literature-search` | Running that search as a repeatable, receipted step | Copy into `.claude/skills/`; needs `lit-search` |
 | convert | `bin/pdf2md` | PDFs are expensive to read and cannot be quoted by page | Copy onto PATH; needs `pdftotext` (poppler); optional `ocrmypdf` (scans), `qpdf` (encrypted PDFs), `docling` |
 | convert | `skills/pdf-to-markdown` | Choosing between text extraction and OCR | Copy into `.claude/skills/`; needs `pdf2md` |
@@ -35,6 +35,12 @@ noted; `build-paper` is a POSIX shell script.
 | analysis | `skills/analysis-pipeline` | Conventions: frozen raw data, stable outputs, one command | Copy into `.claude/skills/`; needs `new-pipeline` |
 
 Skills call tools by bare name; if a tool is not on PATH, run it from `plugins/research-kit/bin/`.
+
+## Windows
+
+Supported. You need Python 3.9 or newer, `pdftotext` (poppler) for `pdf2md`, and pandoc for `build-paper`
+(a POSIX `sh` script: run it from Git Bash or WSL). The Python tools read and write UTF-8 whatever the
+console's code page.
 
 ## Full install
 

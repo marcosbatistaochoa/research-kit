@@ -122,6 +122,11 @@ def check_note(note: Path) -> list[tuple[bool, str]]:
 
 
 def main(argv: list[str]) -> int:
+    for _s in (sys.stdout, sys.stderr):  # UTF-8 output regardless of the locale (e.g. Windows cp1252)
+        try:
+            _s.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError, OSError):
+            pass
     if any(a in ("-h", "--help") for a in argv[1:]):
         print(__doc__ + "Requires: python3 >= 3.9 (stdlib only).")
         return 0

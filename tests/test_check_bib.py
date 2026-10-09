@@ -18,10 +18,10 @@ class CheckBib(unittest.TestCase):
     def run_tool(self, bib, paper="Text [@a2020x; @b2021y].\n"):
         with tempfile.TemporaryDirectory() as t:
             root = Path(t)
-            (root / "r.bib").write_text(bib)
-            (root / "p.md").write_text(paper)
+            (root / "r.bib").write_text(bib, encoding="utf-8")
+            (root / "p.md").write_text(paper, encoding="utf-8")
             return subprocess.run([sys.executable, str(TOOL), str(root / "r.bib"), str(root / "p.md")],
-                                  capture_output=True, text=True)
+                                  capture_output=True, text=True, encoding="utf-8", errors="replace")
 
     def test_clean(self):
         r = self.run_tool(GOOD)
@@ -58,7 +58,7 @@ class CheckBib(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
 
     def test_missing_bib_usage_error(self):
-        r = subprocess.run([sys.executable, str(TOOL), "/nonexistent.bib"], capture_output=True, text=True)
+        r = subprocess.run([sys.executable, str(TOOL), "/nonexistent.bib"], capture_output=True, text=True, encoding="utf-8", errors="replace")
         self.assertEqual(r.returncode, 2)
 
 

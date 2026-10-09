@@ -1,3 +1,4 @@
+import sys
 import os
 import subprocess
 import tempfile
@@ -10,6 +11,7 @@ IP = "10.1." + "2.3"
 EMAIL = "jane@" + "example.org"
 
 
+@unittest.skipIf(sys.platform == "win32", "leak-check.sh needs bash")
 class LeakCheck(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -17,7 +19,7 @@ class LeakCheck(unittest.TestCase):
         self.repo = Path(self.tmp.name) / "repo"
         self.repo.mkdir()
         self.deny = Path(self.tmp.name) / "denylist"
-        self.deny.write_text("# comment\n\nSecretProject\n")
+        self.deny.write_text("# comment\n\nSecretProject\n", encoding="utf-8")
         self.git("init", "-q")
         self.git("config", "user.email", "t@users.noreply.github.com")
         self.git("config", "user.name", "t")
@@ -26,10 +28,10 @@ class LeakCheck(unittest.TestCase):
         subprocess.run(["git", *a], cwd=self.repo, check=True, capture_output=True)
 
     def run_check(self, content, *args, deny=True):
-        (self.repo / "f.txt").write_text(content + "\n")
+        (self.repo / "f.txt").write_text(content + "\n", encoding="utf-8")
         self.git("add", "f.txt")
         env = dict(os.environ, RESEARCH_KIT_DENYLIST=str(self.deny if deny else self.tmp.name + "/missing"))
-        return subprocess.run(["bash", str(SCRIPT), *args], cwd=self.repo, env=env, capture_output=True, text=True)
+        return subprocess.run(["bash", str(SCRIPT), *args], cwd=self.repo, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
 
     def test_home_path(self):
         r = self.run_check("see " + HOME_PATH)
@@ -48,18 +50,18 @@ class LeakCheck(unittest.TestCase):
     def test_source_md_email_exempt_but_denylist_not(self):
         d = self.repo / "02_sources" / "md"
         d.mkdir(parents=True)
-        (d / "paper.md").write_text("contact " + EMAIL + "\n")
+        (d / "paper.md").write_text("contact " + EMAIL + "\n", encoding="utf-8")
         self.assertEqual(self.run_check("clean").returncode, 0)
-        (d / "paper.md").write_text("contact " + EMAIL + " SecretProject\n")
+        (d / "paper.md").write_text("contact " + EMAIL + " SecretProject\n", encoding="utf-8")
         self.git("add", "-A")
         self.assertEqual(self.run_check("clean").returncode, 1)
 
     def test_author_lines_exempt_only_in_metadata(self):
         env = dict(os.environ, RESEARCH_KIT_DENYLIST=str(self.deny))
         def check(name, content):
-            (self.repo / name).write_text(content + "\n")
+            (self.repo / name).write_text(content + "\n", encoding="utf-8")
             self.git("add", name)
-            r = subprocess.run(["bash", str(SCRIPT)], cwd=self.repo, env=env, capture_output=True, text=True)
+            r = subprocess.run(["bash", str(SCRIPT)], cwd=self.repo, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
             self.git("rm", "-q", "--cached", name)
             return r.returncode
         self.assertEqual(check("LICENSE", "Copyright (c) 2026 SecretProject"), 0)
@@ -85,13 +87,13 @@ class LeakCheck(unittest.TestCase):
         self.assertEqual(self.run_check(EMAIL, deny=False).returncode, 1)
 
     def test_tree_and_history(self):
-        (self.repo / "f.txt").write_text("host " + IP + "\n")
+        (self.repo / "f.txt").write_text("host " + IP + "\n", encoding="utf-8")
         self.git("add", "f.txt")
         self.git("commit", "-qm", "x")
-        (self.repo / "f.txt").write_text("clean\n")
+        (self.repo / "f.txt").write_text("clean\n", encoding="utf-8")
         self.git("commit", "-qam", "y")
         env = dict(os.environ, RESEARCH_KIT_DENYLIST=str(self.deny))
-        run = lambda m: subprocess.run(["bash", str(SCRIPT), m], cwd=self.repo, env=env, capture_output=True, text=True)
+        run = lambda m: subprocess.run(["bash", str(SCRIPT), m], cwd=self.repo, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
         self.assertEqual(run("--tree").returncode, 0)
         h = run("--history")
         self.assertEqual(h.returncode, 1)

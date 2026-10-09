@@ -25,7 +25,8 @@ def run(cmd):
     """Run an external command; raise ToolMissing if the binary is absent."""
     if shutil.which(cmd[0]) is None:
         raise ToolMissing(f"required program '{cmd[0]}' not found on PATH")
-    return subprocess.run(cmd, capture_output=True, text=True)
+    return subprocess.run(cmd, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
 
 
 def sha256(path):
@@ -105,7 +106,7 @@ def render(pdf, digest, pages, method):
 
 def append_manifest(manifest, row):
     new = not manifest.exists()
-    with open(manifest, "a", newline="") as f:
+    with open(manifest, "a", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=MANIFEST_FIELDS)
         if new:
             w.writeheader()
@@ -113,6 +114,11 @@ def append_manifest(manifest, row):
 
 
 def main(argv=None):
+    for _s in (sys.stdout, sys.stderr):  # UTF-8 output regardless of the locale (e.g. Windows cp1252)
+        try:
+            _s.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError, OSError):
+            pass
     ap = argparse.ArgumentParser(description=__doc__, epilog=(
         "Requires: python3 >= 3.9, pdftotext (poppler). Optional: ocrmypdf (scans), qpdf (encrypted), docling."))
     ap.add_argument("pdfs", nargs="+")
@@ -149,7 +155,7 @@ def main(argv=None):
             continue
         digest = sha256(pdf)
         text, cpp = render(pdf, digest, pages, method)
-        dest.write_text(text)
+        dest.write_text(text, encoding="utf-8")
         append_manifest(manifest, {"stem": pdf.stem, "source": str(pdf), "sha256": digest,
                                    "pages": len(pages), "chars_per_page": cpp,
                                    "method": method, "md_path": str(dest)})

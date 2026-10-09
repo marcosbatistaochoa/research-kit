@@ -13,7 +13,7 @@ FILES = ["CLAUDE.md", "00_admin/TASKLIST.md", "00_admin/progress.md",
 
 
 def run(*args):
-    return subprocess.run([sys.executable, str(TOOL), *args], capture_output=True, text=True)
+    return subprocess.run([sys.executable, str(TOOL), *args], capture_output=True, text=True, encoding="utf-8", errors="replace")
 
 
 class NewProject(unittest.TestCase):
@@ -28,8 +28,8 @@ class NewProject(unittest.TestCase):
                 self.assertTrue((target / d / ".gitkeep").is_file(), d)
             for f in FILES:
                 self.assertTrue((target / f).is_file(), f)
-            self.assertIn("## Resume here", (target / "00_admin/TASKLIST.md").read_text())
-            self.assertEqual((target / "07_references/references.bib").read_text(), "")
+            self.assertIn("## Resume here", (target / "00_admin/TASKLIST.md").read_text(encoding="utf-8"))
+            self.assertEqual((target / "07_references/references.bib").read_text(encoding="utf-8"), "")
 
     def test_accepts_empty_existing_dir(self):
         with tempfile.TemporaryDirectory() as t:
@@ -37,7 +37,7 @@ class NewProject(unittest.TestCase):
 
     def test_refuses_non_empty_dir(self):
         with tempfile.TemporaryDirectory() as t:
-            (Path(t) / "keep.txt").write_text("x")
+            (Path(t) / "keep.txt").write_text("x", encoding="utf-8")
             r = run(t)
             self.assertEqual(r.returncode, 1)
             self.assertIn("not empty", r.stderr)
@@ -46,7 +46,7 @@ class NewProject(unittest.TestCase):
     def test_refuses_file_target(self):
         with tempfile.TemporaryDirectory() as t:
             f = Path(t) / "f"
-            f.write_text("x")
+            f.write_text("x", encoding="utf-8")
             self.assertEqual(run(str(f)).returncode, 1)
 
     def test_usage(self):

@@ -21,17 +21,20 @@ NOW = dt.datetime(2026, 10, 9, 12, 0, tzinfo=dt.timezone.utc)
 
 
 def fx(name):
-    return (FIX / name).read_text()
+    return (FIX / name).read_text(encoding="utf-8")
 
 
 def fake_fetch(routes, fail=()):
-    def f(url, accept="application/json"):
+    def f(url, accept="application/json", **kw):
+        if kw.get("headers"):
+            f.headers[url] = kw["headers"]
         for key, body in routes.items():
             if key in url:
                 if key in fail:
                     raise RuntimeError("HTTP 503")
                 return body
         raise RuntimeError("unrouted " + url)
+    f.headers = {}
     return f
 
 
@@ -92,9 +95,9 @@ class Run(unittest.TestCase):
                 rows = list(csv.DictReader(fh))
             self.assertEqual(len(rows), 4)
             self.assertEqual([x["status"] for x in rows].count("RETRACTED"), 1)
-            md = (Path(t) / (stem + ".md")).read_text()
+            md = (Path(t) / (stem + ".md")).read_text(encoding="utf-8")
             self.assertIn("RETRACTED", md)
-            self.assertEqual(json.loads((Path(t) / (stem + ".receipt.json")).read_text())["query"], "Money & Prices")
+            self.assertEqual(json.loads((Path(t) / (stem + ".receipt.json")).read_text(encoding="utf-8"))["query"], "Money & Prices")
 
     def test_one_index_down_is_partial(self):
         with tempfile.TemporaryDirectory() as t:
@@ -189,7 +192,26 @@ class Privacy(unittest.TestCase):
             r, _, stem = ls.run_search("q", None, 25, None, Path(t), fake_fetch(ROUTES), NOW, "secret-addr")
             self.assertEqual(r["endpoints"]["openalex"]["mailto"], "set")
             for f in Path(t).iterdir():
-                self.assertNotIn("secret-addr", f.read_text())
+                self.assertNotIn("secret-addr", f.read_text(encoding="utf-8"))
+
+
+class ApiKey(unittest.TestCase):
+    def test_header_sent_to_s2_only_and_key_not_recorded(self):
+        fetch = fake_fetch(ROUTES)
+        with tempfile.TemporaryDirectory() as t:
+            r, _, _ = ls.run_search("q", None, 25, None, Path(t), fetch, NOW, "", "s3cr3t-key")
+            self.assertEqual(r["endpoints"]["semanticscholar"]["api_key"], "set")
+            for f in Path(t).iterdir():
+                self.assertNotIn("s3cr3t-key", f.read_text(encoding="utf-8"))
+        self.assertEqual(list(fetch.headers.values()), [{"x-api-key": "s3cr3t-key"}])
+        self.assertIn("api.semanticscholar.org", list(fetch.headers)[0])
+
+    def test_no_header_without_key(self):
+        fetch = fake_fetch(ROUTES)
+        with tempfile.TemporaryDirectory() as t:
+            r, _, _ = ls.run_search("q", None, 25, None, Path(t), fetch, NOW)
+        self.assertEqual(fetch.headers, {})
+        self.assertEqual(r["endpoints"]["semanticscholar"]["api_key"], "unset")
 
 
 class BibExport(unittest.TestCase):
@@ -204,10 +226,10 @@ class BibExport(unittest.TestCase):
             added, skipped, failed = ls.export_bib(["https://doi.org/10.1000/alpha", "10.1000/nope"], bib, fetch)
             self.assertEqual(len(added), 1)
             self.assertEqual([d for d, _ in failed], ["10.1000/nope"])
-            self.assertIn("@article{example2018money", bib.read_text())
+            self.assertIn("@article{example2018money", bib.read_text(encoding="utf-8"))
             added, skipped, failed = ls.export_bib(["10.1000/alpha"], bib, fetch)
             self.assertEqual((len(added), len(skipped)), (0, 1))
-            self.assertEqual(bib.read_text().count("@article"), 1)
+            self.assertEqual(bib.read_text(encoding="utf-8").count("@article"), 1)
 
 
 if __name__ == "__main__":

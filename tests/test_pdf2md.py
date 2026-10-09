@@ -46,7 +46,7 @@ class NotAPdf(unittest.TestCase):
         import io
         with tempfile.TemporaryDirectory() as t:
             bad = Path(t) / "x.pdf"
-            bad.write_text("hello")
+            bad.write_text("hello", encoding="utf-8")
             err = io.StringIO()
             with contextlib.redirect_stderr(err):
                 rc = pdf2md.main([str(bad), "--out", str(Path(t) / "md")])
@@ -73,14 +73,14 @@ class RealPdf(unittest.TestCase):
 
     def test_text_pdf_markers_and_manifest(self):
         self.assertEqual(self.run_tool(), 0)
-        md = (self.out / "paper.md").read_text()
+        md = (self.out / "paper.md").read_text(encoding="utf-8")
         self.assertIn("<!-- page 1 -->", md)
         self.assertIn("<!-- page 2 -->", md)
         self.assertIn("Alpha page one", md)
         self.assertIn("pages: 2", md)
         self.assertIn("method: pdftotext", md)
         self.assertIn("sha256: " + pdf2md.sha256(self.pdf), md)
-        rows = list(csv.DictReader(open(self.dir / "02_sources" / "manifest.csv")))
+        rows = list(csv.DictReader(open(self.dir / "02_sources" / "manifest.csv", encoding="utf-8")))
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["stem"], "paper")
         self.assertEqual(rows[0]["pages"], "2")
@@ -88,19 +88,19 @@ class RealPdf(unittest.TestCase):
 
     def test_layout_flag_recorded(self):
         self.assertEqual(self.run_tool("--layout"), 0)
-        self.assertIn("method: pdftotext-layout", (self.out / "paper.md").read_text())
+        self.assertIn("method: pdftotext-layout", (self.out / "paper.md").read_text(encoding="utf-8"))
 
     def test_no_overwrite_unless_force(self):
         self.run_tool()
         md = self.out / "paper.md"
-        md.write_text("EDITED")
+        md.write_text("EDITED", encoding="utf-8")
         self.run_tool()
-        self.assertEqual(md.read_text(), "EDITED")
-        rows = list(csv.DictReader(open(self.dir / "02_sources" / "manifest.csv")))
+        self.assertEqual(md.read_text(encoding="utf-8"), "EDITED")
+        rows = list(csv.DictReader(open(self.dir / "02_sources" / "manifest.csv", encoding="utf-8")))
         self.assertEqual(len(rows), 1)
         self.run_tool("--force")
-        self.assertIn("Alpha page one", md.read_text())
-        rows = list(csv.DictReader(open(self.dir / "02_sources" / "manifest.csv")))
+        self.assertIn("Alpha page one", md.read_text(encoding="utf-8"))
+        rows = list(csv.DictReader(open(self.dir / "02_sources" / "manifest.csv", encoding="utf-8")))
         self.assertEqual(len(rows), 2)
 
 
