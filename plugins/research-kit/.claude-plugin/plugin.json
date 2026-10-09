@@ -1,6 +1,6 @@
 {
   "name": "research-kit",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Skills, agents and tools for source-grounded research projects: PDF to markdown, literature notes, quote verification.",
   "author": { "name": "Nik Khosravipour", "url": "https://github.com/nik110403" },
   "license": "MIT"
