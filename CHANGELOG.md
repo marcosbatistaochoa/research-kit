@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- 2026-10-15: Documentation only. README restructured with banner, terminal
+  transcript and plugin tables per the public repository template; `tools/banner`
+  added for regenerating the images. Plugin version stays 0.1.1.
 - Expand collection documentation with a complete catalog, whole and selective
   installation, contributor guidance and non-Claude manual adapters.
 - Clarify support assets, tool paths, template layout, review dependencies,

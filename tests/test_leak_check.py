@@ -111,6 +111,24 @@ class LeakCheck(unittest.TestCase):
         )
         self.assertEqual(check("README.md", "see SecretProject/research-kit"), 1)
 
+    def test_banner_footer_default_allowed_on_exact_line_only(self):
+        line = '    p.add_argument("--footer", default="secretproject.com")'
+        self.deny.write_text("secretproject\n", encoding="utf-8")
+        env = dict(os.environ, RESEARCH_KIT_DENYLIST=str(self.deny))
+        for name, text, want in (
+            ("tools/banner/bin/make-banner", line, 0),
+            ("tools/banner/bin/make-banner", line + " # secretproject", 1),
+            ("tools/other", line, 1),
+        ):
+            path = self.repo / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text + "\n", encoding="utf-8")
+            self.git("add", name)
+            r = subprocess.run(["bash", str(SCRIPT)], cwd=self.repo, env=env,
+                               capture_output=True, text=True)
+            self.git("reset", "-q")
+            self.assertEqual(r.returncode, want, name + text)
+
     def test_denylist_case_insensitive(self):
         self.assertEqual(self.run_check("about SECRETPROJECT today").returncode, 1)
 

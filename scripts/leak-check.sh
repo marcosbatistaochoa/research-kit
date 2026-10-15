@@ -102,6 +102,8 @@ scan() {
       low = tolower(line)
       # the author identity may be named only on its copyright/metadata lines
       if ($1 ~ /(^|:)(LICENSE|\.claude-plugin\/marketplace\.json|plugins\/research-kit\/\.claude-plugin\/plugin\.json):[0-9]+$/ && line ~ /^Copyright \(c\) |"(name|owner|author)": *[{"]/) next
+      # The vendored banner tool carries the site name as its --footer default; allowed on that exact line only.
+      if ($1 ~ /(^|:)tools\/banner\/bin\/make-banner:[0-9]+$/ && line ~ /^    p\.add_argument\("--footer", default="[a-z.]+"\)$/) next
       if ($1 ~ /(^|:)README\.md:[0-9]+$/ && line ~ /^\/plugin marketplace add [A-Za-z0-9-]+\/research-kit$/) next
       # Only exact public tokens in these root-relative docs leave the comparison.
       # All other text, including other deny terms on the same line, stays checked.
