@@ -1,72 +1,88 @@
 # research-kit
 
-A Claude Code plugin for source-grounded research: search the literature, convert PDFs to
-page-marked markdown, write notes whose quotes are verified verbatim against the source, review a
-draft against those notes, and build the paper. It also scaffolds a reproducible analysis pipeline
-(Python or R). Early stage (0.1.0). The stages and the files that flow between them are in
-[docs/workflow.md](docs/workflow.md).
+Turn a reading list into source-grounded notes, check a draft against those notes,
+and build a paper. Start with the offline quote check below: it checks 14 real
+quotations and rejects a planted fabrication without a model or network connection.
 
-## Take what you need
+This is a collection of **7 skills, 4 agent roles, 8 command-line tools and project,
+Python and R templates**. Install the whole Claude Code plugin or take the parts
+you need. The skills and roles are Markdown instructions; the helpers are seven
+Python programs and one POSIX shell script. Reading a skill does not execute a tool.
 
-Every piece works on its own. Tools are single files: copy one onto your PATH (`chmod +x`), and
-`<tool> --help` prints usage and dependencies. All tools need python3 >= 3.9 (stdlib only) unless
-noted; `build-paper` is a POSIX shell script.
+**Status:** early-stage plugin **0.1.1**. This documentation candidate is staged;
+it does not announce a new release or an already-published collection update.
 
-| Stage | Component (path) | Problem it fixes | Standalone use |
-|---|---|---|---|
-| scaffold | `plugins/research-kit/bin/new-project` | Every project starts with a different folder layout | Copy `bin/new-project` and `templates/project/` side by side (it finds the template next to itself); run `new-project my-paper` |
-| scaffold | `skills/new-research-project` | Asking Claude to start a project | Copy the folder into `.claude/skills/`; needs `new-project` on PATH |
-| search | `bin/lit-search` | Searching two indexes, deduping, ranking, spotting retracted papers, getting BibTeX | Copy onto PATH; needs internet (OpenAlex, Semantic Scholar, doi.org). Without a Semantic Scholar API key its requests are often refused (HTTP 429/403) and search falls back to OpenAlex only; set `SEMANTIC_SCHOLAR_API_KEY` to send one (never written to the receipt) |
-| search | `skills/literature-search` | Running that search as a repeatable, receipted step | Copy into `.claude/skills/`; needs `lit-search` |
-| convert | `bin/pdf2md` | PDFs are expensive to read and cannot be quoted by page | Copy onto PATH; needs `pdftotext` (poppler); optional `ocrmypdf` (scans), `qpdf` (encrypted PDFs), `docling` |
-| convert | `skills/pdf-to-markdown` | Choosing between text extraction and OCR | Copy into `.claude/skills/`; needs `pdf2md` |
-| notes | `agents/source-reader.md` | One agent reads one source and returns a note with page-pinned quotes | Copy into your project's `.claude/agents/`; read-only tools (Read, Grep, Glob) |
-| notes | `bin/verify-quotes` | Invented or misquoted quotes in notes | Copy onto PATH; checks notes against source markdown with `<!-- page N -->` markers |
-| notes | `skills/literature-notes` (with `template.md`) | A consistent note format with claims and quotes | Copy the folder into `.claude/skills/`; needs `verify-quotes` |
-| review | `bin/check-claims` | Cited sentences with no supporting note | Copy onto PATH; expects `01_notes/lit/<citekey>.md` |
-| review | `bin/check-bib` | Duplicate keys, missing fields, bad DOIs, cited-but-missing keys | Copy onto PATH |
-| review | `agents/claim-checker.md` | Does the note really support the cited sentence | Copy into `.claude/agents/`; read-only |
-| review | `agents/skeptic.md` | Nobody tries to refute the draft's key claims | Copy into `.claude/agents/`; read-only |
-| review | `skills/review-against-notes` | Ordering: mechanical checks, then judgment, then adversary | Copy into `.claude/skills/`; needs the two tools and two agents above |
-| build | `bin/build-paper` | Silent unresolved citations and missing figures in the build | Copy onto PATH; needs `pandoc`; optional `xelatex` (PDF, otherwise HTML) |
-| build | `skills/paper-build` | Compile plus bibliography check in one step | Copy into `.claude/skills/`; needs `build-paper`, `check-bib` |
-| analysis | `bin/new-pipeline` | Ad-hoc analysis scripts that cannot be rerun | Copy `bin/new-pipeline` and `templates/pipeline/` side by side; `new-pipeline dir --lang python\|r`; R variant needs R |
-| analysis | `agents/pipeline-runner.md` | Running a pipeline and reporting results; it never edits your code (the pipeline itself writes `output/`) | Copy into `.claude/agents/`; needs python3 (or R); it runs project code, so trust the pipeline |
-| analysis | `skills/analysis-pipeline` | Conventions: frozen raw data, stable outputs, one command | Copy into `.claude/skills/`; needs `new-pipeline` |
+## Install the whole collection in Claude Code
 
-Skills call tools by bare name; if a tool is not on PATH, run it from `plugins/research-kit/bin/`.
+In Claude Code:
 
-## Windows
-
-Supported. You need Python 3.9 or newer, `pdftotext` (poppler) for `pdf2md`, and pandoc for `build-paper`
-(a POSIX `sh` script: run it from Git Bash or WSL). The Python tools read and write UTF-8 whatever the
-console's code page.
-
-## Full install
-
-```
+```text
 /plugin marketplace add nik110403/research-kit
 /plugin install research-kit@research-kit
 ```
 
-Then ask Claude to start a new research project (skill `new-research-project`).
+Then ask it to start a research project, search the literature, or verify notes.
+The plugin packages all seven skills and four roles. Command-line dependencies
+still need to be available; see [INSTALL.md](INSTALL.md) for tool paths, selective
+installation and existing-settings precautions.
 
-## Quickstart: the quote check
+## Try it offline first
 
-`examples/basic` holds two open-access papers, their conversions and notes
-(see [examples/basic/RUN.md](examples/basic/RUN.md) for the full walk-through). From the repo root:
+Download or clone the public [research-kit repository](https://github.com/nik110403/research-kit).
+With Python 3.9+ installed, run from its root:
 
 ```sh
-plugins/research-kit/bin/pdf2md examples/basic/02_sources/pdf/*.pdf --out /tmp/md-demo   # needs pdftotext
 cd examples/basic
-../../plugins/research-kit/bin/verify-quotes 01_notes/lit/*.md        # 14 of 14 PASS, exit 0
-../../plugins/research-kit/bin/verify-quotes 01_notes/negative/*.md   # fabricated quote: FAIL, exit 1
+python3 ../../plugins/research-kit/bin/verify-quotes 01_notes/lit/*.md
+python3 ../../plugins/research-kit/bin/verify-quotes 01_notes/negative/*.md
 ```
 
-`make check` runs the test suite, plugin validation (if the `claude` CLI is present), the
-example quote check and the leak gate.
+The first command should print **14 of 14 PASS** and exit 0. The second should
+report the fabricated quotation as **FAIL** and exit 1; that failure is expected.
+The source conversions are bundled, so this check needs neither PDF software nor
+an API key. See the [example walkthrough](examples/basic/RUN.md) and
+[source attribution](examples/basic/SOURCES.md). Quote matching checks converted
+text and page markers, not whether a claim follows from the quotation.
 
-## Contributing
+## Take only what you need
 
-Enable the leak gate with `git config core.hooksPath .githooks`. It blocks home paths, IPs, personal
-emails and terms from your private denylist (`$RESEARCH_KIT_DENYLIST`); run `scripts/leak-check.sh --history` for a full scan.
+| Want to… | Start here |
+|---|---|
+| Check quotations without an assistant | [verify-quotes](plugins/research-kit/bin/verify-quotes) |
+| Search and save a reading list | [lit-search](plugins/research-kit/bin/lit-search), [literature-search](plugins/research-kit/skills/literature-search/SKILL.md) |
+| Read a source into a structured note | [literature-notes](plugins/research-kit/skills/literature-notes/SKILL.md), [source-reader](plugins/research-kit/agents/source-reader.md) |
+| Review a draft against notes | [review-against-notes](plugins/research-kit/skills/review-against-notes/SKILL.md) |
+| Start a repeatable analysis | [analysis-pipeline](plugins/research-kit/skills/analysis-pipeline/SKILL.md), [pipeline templates](plugins/research-kit/templates/pipeline/) |
+
+The [complete catalog](CATALOG.md) lists every component's inputs, outputs and
+dependencies. The [workflow](docs/workflow.md) shows how files connect; the
+[adapter guide](docs/adapters.md) covers manual use with other assistants.
+
+## Dependencies and limits
+
+- Python helpers require Python 3.9+ and use the standard library, except the
+  optional Docling conversion backend. Search needs internet access. Semantic
+  Scholar can reject keyless requests; an optional `SEMANTIC_SCHOLAR_API_KEY`
+  helps, and receipts report provider failures and partial coverage.
+- PDF conversion needs Poppler's `pdftotext`; scans may need `ocrmypdf`, encrypted
+  files `qpdf`. Docling currently emits one block marked page 1, not original PDF
+  pagination. Recheck page pins against the PDF.
+- Paper builds need POSIX `sh` and pandoc; XeLaTeX enables PDF output, otherwise
+  the tool builds HTML. On Windows, use Git Bash or WSL for `build-paper`.
+  UTF-8 Python tests do not establish whole-workflow Windows support.
+- R pipelines need R; Python pipelines can use `uv`. Running a pipeline executes
+  project code with your permissions. Model steps also depend on your assistant's
+  access and may incur its usual costs. No native non-Claude integration or
+  cross-platform performance guarantee is claimed.
+
+## License and contributions
+
+Code, skills, agents and templates are [MIT](LICENSE). Documentation under
+`docs/` is [CC BY 4.0](LICENSE-docs); bundled papers and conversions retain their
+authors' attribution. See the [licensing map](LICENSING.md). The new root guides
+use MIT, the same license as this README.
+
+[CONTRIBUTING.md](CONTRIBUTING.md) covers checks, privacy and licensing;
+[CHANGELOG.md](CHANGELOG.md) distinguishes released changes from these docs.
+The companion [ai-architecture](https://github.com/nik110403/ai-architecture)
+repository is an early preview, not a promise that this collection update is live.

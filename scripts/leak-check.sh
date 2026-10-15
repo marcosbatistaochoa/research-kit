@@ -8,23 +8,29 @@
 set -u
 mode=staged
 case "${1:-}" in
-  ""|--staged) mode=staged ;;
-  --tree) mode=tree ;;
-  --history) mode=history ;;
-  *) echo "usage: $0 [--staged|--tree|--history]" >&2; exit 2 ;;
+"" | --staged) mode=staged ;;
+--tree) mode=tree ;;
+--history) mode=history ;;
+*)
+	echo "usage: $0 [--staged|--tree|--history]" >&2
+	exit 2
+	;;
 esac
-git rev-parse --git-dir >/dev/null 2>&1 || { echo "leak-check: not a git repository" >&2; exit 2; }
+git rev-parse --git-dir >/dev/null 2>&1 || {
+	echo "leak-check: not a git repository" >&2
+	exit 2
+}
 cd "$(git rev-parse --show-toplevel)" || exit 2
 
 denylist="${RESEARCH_KIT_DENYLIST:-$HOME/.config/research-kit/denylist}"
 if [ ! -f "$denylist" ]; then
-  echo "leak-check: no denylist at $denylist - skipping denylist layer" >&2
-  denylist=""
+	echo "leak-check: no denylist at $denylist - skipping denylist layer" >&2
+	denylist=""
 fi
 
 # Reads unified diff on stdin, emits "label<TAB>added-line".
 diff_to_stream() {
-  awk '
+	awk '
     /^commit [0-9a-f]+/ { commit = substr($2, 1, 10); next }
     /^\+\+\+ / { f = substr($0, 7); if ($0 ~ /^\+\+\+ \/dev\/null/) f = ""; next }
     /^--- / { next }
@@ -36,16 +42,18 @@ diff_to_stream() {
 }
 
 tree_stream() {
-  git ls-files -co --exclude-standard | while IFS= read -r f; do
-    [ -f "$f" ] || continue
-    grep -In '' -- "$f" 2>/dev/null | awk -v f="$f" '{ n = $0; sub(/:.*/, "", n); sub(/^[0-9]+:/, ""); print f ":" n "\t" $0 }'
-  done
+	git ls-files -co --exclude-standard | while IFS= read -r f; do
+		[ -f "$f" ] || continue
+		grep -In '' -- "$f" 2>/dev/null | awk -v f="$f" '{ n = $0; sub(/:.*/, "", n); sub(/^[0-9]+:/, ""); print f ":" n "\t" $0 }'
+	done
 }
 
 scan() {
-  awk -F'\t' -v deny="$denylist" '
+	awk -F'\t' -v deny="$denylist" '
     BEGIN {
       home = "/ho" "me/"; users = "/Us" "ers/"
+      public_owner = "nik" "110403"
+      public_url = "https://github\\.com/" public_owner "/(research-kit|ai-architecture)"
       n = 0
       if (deny != "") while ((getline t < deny) > 0) {
         sub(/\r$/, "", t); sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t)
@@ -54,6 +62,19 @@ scan() {
       }
     }
     function hit(kind, s) { printf "%s: [%s] %s\n", $1, kind, s; bad = 1 }
+    function public_references(s, out, p, len, before, after, token) {
+      out = ""
+      while (match(s, public_url)) {
+        p = RSTART; len = RLENGTH; token = substr(s, p, len)
+        before = p > 1 ? substr(s, p - 1, 1) : ""
+        after = substr(s, p + len, 1)
+        if ((before == "" || index(" \t\r\n([<\"`", before)) &&
+            (after == "" || index(" \t\r\n)]>\"`,;", after))) token = " "
+        out = out substr(s, 1, p - 1) token
+        s = substr(s, p + len)
+      }
+      return out s
+    }
     {
       line = $0; sub(/^[^\t]*\t/, "", line)
       if (index(line, home) || index(line, users)) hit("home-path", line)
@@ -82,6 +103,14 @@ scan() {
       # the author identity may be named only on its copyright/metadata lines
       if ($1 ~ /(^|:)(LICENSE|\.claude-plugin\/marketplace\.json|plugins\/research-kit\/\.claude-plugin\/plugin\.json):[0-9]+$/ && line ~ /^Copyright \(c\) |"(name|owner|author)": *[{"]/) next
       if ($1 ~ /(^|:)README\.md:[0-9]+$/ && line ~ /^\/plugin marketplace add [A-Za-z0-9-]+\/research-kit$/) next
+      # Only exact public tokens in these root-relative docs leave the comparison.
+      # All other text, including other deny terms on the same line, stays checked.
+      if ($1 ~ /^([0-9a-f]+:)?(README\.md|INSTALL\.md|CATALOG\.md|CONTRIBUTING\.md|CHANGELOG\.md|docs\/(adapters|workflow)\.md):[0-9]+$/) {
+        comparison = public_references(line)
+        if ($1 ~ /^([0-9a-f]+:)?INSTALL\.md:[0-9]+$/ &&
+            line == "/plugin marketplace add " public_owner "/research-kit") comparison = ""
+        low = tolower(comparison)
+      }
       for (i = 1; i <= n; i++) if (index(low, terms[i])) hit("denylist", "term #" i)
     }
     END { exit bad ? 1 : 0 }'
@@ -89,17 +118,17 @@ scan() {
 
 rc=0
 case "$mode" in
-  staged) git diff --cached -U0 --no-color --diff-filter=ACM | diff_to_stream | scan || rc=1 ;;
-  history) git log -p --all -U0 --no-color --format='commit %H' 2>/dev/null | diff_to_stream | scan || rc=1 ;;
-  tree) tree_stream | scan || rc=1 ;;
+staged) git diff --cached -U0 --no-color --diff-filter=ACM | diff_to_stream | scan || rc=1 ;;
+history) git log -p --all -U0 --no-color --format='commit %H' 2>/dev/null | diff_to_stream | scan || rc=1 ;;
+tree) tree_stream | scan || rc=1 ;;
 esac
 
 if command -v gitleaks >/dev/null 2>&1; then
-  case "$mode" in
-    staged) gitleaks protect --staged --no-banner >&2 2>&1 || gitleaks git --staged --no-banner >&2 2>&1 || rc=1 ;;
-    history) gitleaks detect --no-banner >&2 2>&1 || rc=1 ;;
-    tree) gitleaks detect --no-git --no-banner >&2 2>&1 || rc=1 ;;
-  esac
+	case "$mode" in
+	staged) gitleaks protect --staged --no-banner >&2 2>&1 || gitleaks git --staged --no-banner >&2 2>&1 || rc=1 ;;
+	history) gitleaks detect --no-banner >&2 2>&1 || rc=1 ;;
+	tree) gitleaks detect --no-git --no-banner >&2 2>&1 || rc=1 ;;
+	esac
 fi
 
 [ "$rc" -eq 0 ] && echo "leak-check ($mode): clean" >&2

@@ -1,0 +1,65 @@
+# Component catalog
+
+All components live in [plugins/research-kit/](plugins/research-kit/). There are
+no second component trees or root command aliases. Follow [INSTALL.md](INSTALL.md)
+when copying a subset: a skill folder can contain required assets, and scaffold
+tools resolve templates relative to their own file location.
+
+## Seven skills
+
+Skills are instructions for an assistant, not standalone executables. Outputs
+below are workflow artifacts; the main session saves model-returned text.
+
+| Skill | Inputs → outputs | Dependencies and selective use |
+|---|---|---|
+| [new-research-project](plugins/research-kit/skills/new-research-project/SKILL.md) | Target directory and question → numbered project tree and filled project kernel | Python 3.9+, `new-project`, `templates/project/`; use for a new, empty target |
+| [literature-search](plugins/research-kit/skills/literature-search/SKILL.md) | Research brief and queries → search CSV, Markdown, receipt; optional BibTeX | `lit-search`, Python, internet; optional Semantic Scholar key and `LIT_SEARCH_MAILTO`; use independently of PDF/note stages |
+| [pdf-to-markdown](plugins/research-kit/skills/pdf-to-markdown/SKILL.md) | PDFs → source Markdown and manifest | `pdf2md`, Python, `pdftotext`; optional OCR/decryption/Docling; use for local sources |
+| [literature-notes](plugins/research-kit/skills/literature-notes/SKILL.md) | Source Markdown, citekey, reading scope → `01_notes/lit/<citekey>.md`, quote-check results | Full folder including [template.md](plugins/research-kit/skills/literature-notes/template.md), `source-reader`, `verify-quotes`; use on already-converted sources |
+| [review-against-notes](plugins/research-kit/skills/review-against-notes/SKILL.md) | Draft and literature notes → dated review report | `verify-quotes`, `check-claims`, `claim-checker`, `skeptic`; `check-bib` is a useful separate check, not included in this skill's sequence |
+| [paper-build](plugins/research-kit/skills/paper-build/SKILL.md) | `10_paper/paper.md`, metadata, bibliography → bibliography findings, PDF or HTML, log | `check-bib`, `build-paper`, Python, POSIX shell, pandoc; optional XeLaTeX; use on a prepared draft |
+| [analysis-pipeline](plugins/research-kit/skills/analysis-pipeline/SKILL.md) | Pipeline target, language and data → pipeline skeleton, run report, figures/tables | `new-pipeline`, matching templates, `pipeline-runner`, Python or R; optional `uv`/`renv`; trust project code before execution |
+
+## Four agent roles
+
+These are Claude-format role contracts. Copying them to another assistant does
+not automatically configure its permissions or model. See [adapters](docs/adapters.md).
+
+| Role | Inputs → returned output | Dependencies and selective use |
+|---|---|---|
+| [source-reader](plugins/research-kit/agents/source-reader.md) | One source path, citekey, optional scope → one note with claims and page-pinned quotes | Read-only source access; literature-notes `template.md`; caller saves and runs `verify-quotes` |
+| [claim-checker](plugins/research-kit/agents/claim-checker.md) | Draft, cited sentences/keys, notes → supported/partial/not-supported/not-assessed rows and counts | Read-only draft/notes; judges notes only, not outside knowledge or source files |
+| [skeptic](plugins/research-kit/agents/skeptic.md) | Draft and notes → evidence-anchored objections to three strongest claims | Read-only draft/notes; use after mechanical and support checks |
+| [pipeline-runner](plugins/research-kit/agents/pipeline-runner.md) | Trusted pipeline directory → PASS/FAIL, warnings, changed outputs | Read and shell execution; Python or R, optional `uv`; no agent edits, but executed pipeline writes outputs |
+
+## Eight tools
+
+Seven are Python 3.9+ programs (standard library except optional Docling);
+`build-paper` is POSIX shell. Each supports `--help`. Invoke by explicit path
+from the working directory indicated in [INSTALL.md](INSTALL.md).
+
+| Tool | Inputs → outputs | Dependencies and selective use |
+|---|---|---|
+| [new-project](plugins/research-kit/bin/new-project) | Empty target directory → copied research project | Python; `templates/project/` sibling to `bin/`; refuses nonempty targets |
+| [lit-search](plugins/research-kit/bin/lit-search) | Query/options or DOI export → ranked CSV, Markdown, receipt, optional `.bib` append | Python, internet to OpenAlex/Semantic Scholar/doi.org; optional API key; inspect provider status, never call a partial run complete |
+| [pdf2md](plugins/research-kit/bin/pdf2md) | PDF paths/options → `<stem>.md`, manifest | Python, `pdftotext`; optional `ocrmypdf`, `qpdf`, Docling; existing conversions need `--force` to overwrite |
+| [verify-quotes](plugins/research-kit/bin/verify-quotes) | Notes naming source Markdown, pages and text → per-quote PASS/FAIL, nonzero on failure | Python only; offline; checks text against page markers with whitespace/hyphenation normalization |
+| [check-claims](plugins/research-kit/bin/check-claims) | Pandoc-cited draft and note directory → citation-to-note table | Python only; offline; flags missing/thin notes, does not judge entailment |
+| [check-bib](plugins/research-kit/bin/check-bib) | Bibliography and draft → duplicate/missing-field/DOI/citation findings | Python only; offline; syntax/coverage checks do not verify bibliographic truth |
+| [build-paper](plugins/research-kit/bin/build-paper) | Paper directory with Markdown and optional metadata → PDF/HTML and `build.log` | POSIX `sh`, pandoc, optional XeLaTeX and `pdftotext`; guard checks unresolved citations, missing files and `???`; avoid `--soft` for final validation |
+| [new-pipeline](plugins/research-kit/bin/new-pipeline) | Empty target and `--lang python` or `--lang r` → copied pipeline | Python to scaffold; `templates/pipeline/` sibling to `bin/`; Python or R to execute result |
+
+## Templates and examples
+
+| Asset | Inputs → outputs | Dependencies and selective use |
+|---|---|---|
+| [Project template](plugins/research-kit/templates/project/) | Project question → instructions, task/progress files, source/note/code/output directories, bibliography and paper starter | Copy the whole template or use `new-project`; merge instructions rather than overwrite an existing project |
+| [Python pipeline](plugins/research-kit/templates/pipeline/python/) | Numbered `src/NN_*.py` steps and raw data → stable `output/` artifacts | Python 3.9+, optional `uv`; [README](plugins/research-kit/templates/pipeline/python/README.md), `pyproject.toml`, runner, demo and manifest bundled; no environment lock is pre-generated |
+| [R pipeline](plugins/research-kit/templates/pipeline/r/) | Numbered `src/NN_*.R` steps and raw data → stable `output/` artifacts | R; [README](plugins/research-kit/templates/pipeline/r/README.md), runner, demo and manifest bundled; initialize/snapshot `renv` yourself if needed |
+| [Note template](plugins/research-kit/skills/literature-notes/template.md) | Source/citekey/read scope → claims and quoted-text front matter | Keep inside the literature-notes folder; reusable manually |
+| [Basic example](examples/basic/RUN.md) | Bundled papers/conversions/notes → 14 positive checks and one planted failure | Python for offline checks; [source licenses](examples/basic/SOURCES.md) |
+| [Search example](examples/search/RUN.md) | Search question → documented search walkthrough | Live search needs network; fixture-based tests are offline |
+
+Raw-data freezing, provenance columns and environment locks are workflow
+conventions to implement in your project, not guarantees supplied by scaffolding.
+Licenses and early-stage limits are in [README.md](README.md) and [LICENSING.md](LICENSING.md).
