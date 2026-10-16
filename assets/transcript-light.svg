@@ -7,10 +7,10 @@
 <text x="40" y="148" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="400" fill="#1c1917" xml:space="preserve">PASS kireyev2026pricebench.md: quote 1 (p. 1)</text>
 <text x="40" y="180" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="400" fill="#1c1917" xml:space="preserve">PASS kireyev2026pricebench.md: quote 2 (p. 1)</text>
 <text x="40" y="212" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="400" fill="#1c1917" xml:space="preserve">PASS kireyev2026pricebench.md: quote 3 (p. 4)</text>
-<text x="40" y="244" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="400" fill="#1c1917" xml:space="preserve">... 11 more PASS lines (14 of 14 quotes verif</text>
-<text x="40" y="276" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="400" fill="#1c1917" xml:space="preserve">ied), exit 0</text>
+<text x="40" y="244" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="400" fill="#1c1917" xml:space="preserve">... 11 more PASS lines (14 of 14 quotes</text>
+<text x="40" y="276" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="400" fill="#1c1917" xml:space="preserve">  verified), exit 0</text>
 <text x="40" y="308" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="600" fill="#8c2f1b" xml:space="preserve">$ verify-quotes 01_notes/negative/*.md</text>
-<text x="40" y="340" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="400" fill="#1c1917" xml:space="preserve">FAIL lei2023financial-fabricated.md: quote 1 </text>
-<text x="40" y="372" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="400" fill="#1c1917" xml:space="preserve">(p. 1): text not found in source</text>
+<text x="40" y="340" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="400" fill="#1c1917" xml:space="preserve">FAIL lei2023financial-fabricated.md: quote 1</text>
+<text x="40" y="372" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="400" fill="#1c1917" xml:space="preserve">  (p. 1): text not found in source</text>
 <text x="40" y="404" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="400" fill="#1c1917" xml:space="preserve">(exit 1: the planted fabrication is rejected)</text>
 </svg>

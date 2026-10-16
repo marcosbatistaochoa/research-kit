@@ -1,10 +1,16 @@
 # Changelog
 
+## 0.1.2
+
+- Cosmetic release, no behaviour change. Terminal-transcript images now wrap at
+  word boundaries (`tools/banner/bin/make-banner`), the licensing map covers the
+  banner fonts, and a duplicated sentence is gone from the README.
+
 ## Unreleased
 
 - 2026-10-15: Documentation only. README restructured with banner, terminal
   transcript and plugin tables per the public repository template; `tools/banner`
-  added for regenerating the images. Plugin version stays 0.1.1.
+  added for regenerating the images. Plugin version stayed 0.1.1 at that point.
 - Expand collection documentation with a complete catalog, whole and selective
   installation, contributor guidance and non-Claude manual adapters.
 - Clarify support assets, tool paths, template layout, review dependencies,

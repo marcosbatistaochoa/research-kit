@@ -9,7 +9,7 @@ Fonts (Fraunces, Atkinson Hyperlegible, Space Grotesk; SIL OFL 1.1) are embedded
 data-URI @font-face, because GitHub renders README SVGs through <img>, where external
 fonts are blocked. Fonts live in ../fonts relative to this file (override: --fonts-dir).
 """
-import argparse, base64, html, io, pathlib, shutil, subprocess, sys, tempfile
+import argparse, base64, html, io, pathlib, shutil, subprocess, sys, tempfile, textwrap
 from fontTools.ttLib import TTFont
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -145,7 +145,7 @@ def compose_transcript(lines, theme, w=620):  # 20px font * 375/620 = 12.1px eff
     rows = []
     for ln in lines:
         ln = ln.rstrip("\n").replace("\t", "    ")
-        chunks = [ln[i:i + maxc] for i in range(0, len(ln), maxc)] or [""]
+        chunks = textwrap.wrap(ln, maxc, subsequent_indent="  ", break_long_words=True, break_on_hyphens=False) or [""]  # wrap at word boundaries
         rows += [(ln, c) for c in chunks]
     bar = 44
     h = bar + pad + len(rows) * lh + pad - 8

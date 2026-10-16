@@ -4,11 +4,11 @@
 
 [Catalog](CATALOG.md) · [Install guide](INSTALL.md) · [Workflow](docs/workflow.md) · [Changelog](CHANGELOG.md)
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-8c2f1b?style=flat)](LICENSE) [![Plugin version](https://img.shields.io/badge/plugin-0.1.1-57534e?style=flat)](CHANGELOG.md)
+[![License: MIT](https://img.shields.io/badge/license-MIT-8c2f1b?style=flat)](LICENSE) [![Plugin version](https://img.shields.io/badge/plugin-0.1.2-57534e?style=flat)](CHANGELOG.md)
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="assets/transcript-dark.svg"><img src="assets/transcript-light.svg" alt="Terminal transcript: verify-quotes passes 14 real quotations and rejects a planted fabrication" width="100%"></picture>
 
-Early-stage plugin **0.1.1**: 7 skills, 4 agent roles, 8 command-line tools and
+Early-stage plugin **0.1.2**: 7 skills, 4 agent roles, 8 command-line tools and
 project, Python and R templates. Install the whole Claude Code plugin or take the
 parts you need. The skills and roles are Markdown instructions; the helpers are
 seven Python programs and one POSIX shell script. Reading a skill does not execute a tool.
@@ -66,8 +66,7 @@ python3 ../../plugins/research-kit/bin/verify-quotes 01_notes/negative/*.md
 
 The first command should print **14 of 14 PASS** and exit 0. The second should
 report the fabricated quotation as **FAIL** and exit 1; that failure is expected.
-The source conversions are bundled, so this check needs neither PDF software nor
-an API key. See the [example walkthrough](examples/basic/RUN.md) and
+See the [example walkthrough](examples/basic/RUN.md) and
 [source attribution](examples/basic/SOURCES.md). Quote matching checks converted
 text and page markers, not whether a claim follows from the quotation.
 
