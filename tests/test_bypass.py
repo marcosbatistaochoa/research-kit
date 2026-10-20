@@ -399,6 +399,42 @@ class Bypass(unittest.TestCase):
         r = self.run_tool("check-claims", root, "draft.md", "--strict-quotes")
         self.assertEqual(r.returncode, 1, r.stdout)
 
+    def test_draft_side_planted_pair_cannot_pick_notes(self):
+        root = self.project("lei2023financial")
+        (root / "10_paper").mkdir()
+        self.forged_pair(root / "10_paper")
+        (root / "10_paper/01_notes/lit").mkdir()
+        note = (FIX / "notes/lei2023financial.md").read_text(encoding="utf-8").replace(
+            "Conversely, Zeev (2019) underscores that freely depreciating exchange rates can spur exports", self.F)
+        (root / "10_paper/01_notes/lit/lei2023financial.md").write_text(note, encoding="utf-8")
+        (root / "10_paper/ch.md").write_text(f'Lei writes "{self.F}" [@lei2023financial].\n', encoding="utf-8")
+        r = self.run_tool("check-claims", root, "10_paper/ch.md", "--strict-quotes")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        r = self.run_tool("check-claims", root, "10_paper/ch.md")
+        self.assertNotIn("| OK |", r.stdout)
+        self.assertIn("UNVERIFIED", r.stdout)
+
+    def test_draft_side_planted_no_source_note_not_accepted(self):
+        root = self.project("lei2023financial")
+        (root / "10_paper/01_notes/lit").mkdir(parents=True)
+        ns = '---\ncitekey: lei2023financial\nsource_md: none\nno_source: print\nclaims:\n  - "x"\nquotes: []\n---\n'
+        (root / "10_paper/01_notes/lit/lei2023financial.md").write_text(ns, encoding="utf-8")
+        (root / "10_paper/ch.md").write_text("Lei [@lei2023financial].\n", encoding="utf-8")
+        r = self.run_tool("check-claims", root, "10_paper/ch.md", "--strict-quotes")
+        self.assertNotIn("NO-SOURCE", r.stdout, r.stdout)  # real note is used, not the planted one
+
+    def test_symlink_steering_root_rejected(self):
+        root = self.project("lei2023financial")
+        inner = root / "01_notes/lit/inner"
+        self.forged_pair(inner)
+        note = (FIX / "notes/lei2023financial.md").read_text(encoding="utf-8").replace(
+            "Conversely, Zeev (2019) underscores that freely depreciating exchange rates can spur exports", self.F)
+        (inner / "01_notes/lit").mkdir()
+        (inner / "01_notes/lit/lei2023financial.md").write_text(note, encoding="utf-8")
+        (root / "x").symlink_to(inner, target_is_directory=True)
+        r = self.run_tool("verify-quotes", root, "x/01_notes/lit/lei2023financial.md", "--strict")
+        self.assertEqual(r.returncode, 1, r.stdout)
+
     def test_strict_note_outside_01_notes_fails(self):
         root = self.project("lei2023financial")
         shutil.move(str(root / "01_notes/lit"), str(root / "elsewhere"))

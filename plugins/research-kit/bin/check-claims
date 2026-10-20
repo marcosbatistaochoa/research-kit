@@ -36,6 +36,7 @@ if sys.version_info < (3, 9):
 import html
 import importlib.machinery
 import importlib.util
+import os
 import re
 from pathlib import Path
 
@@ -72,7 +73,10 @@ def load_vq():
 
 
 def note_dir(draft: Path) -> Path | None:
-    for base in [draft.resolve().parent, *draft.resolve().parent.parents, Path.cwd()]:
+    """Notes folder of the OUTERMOST ancestor of the draft (absolute, unresolved) holding 01_notes/lit;
+    cwd only if none does. Same principle as verify-quotes: a planted nearer 01_notes/lit never wins."""
+    here = Path(os.path.abspath(draft)).parent
+    for base in [*reversed(here.parents), here, Path.cwd()]:
         if (base / "01_notes/lit").is_dir():
             return base / "01_notes/lit"
     return None

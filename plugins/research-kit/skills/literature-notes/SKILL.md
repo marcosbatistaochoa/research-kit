@@ -8,7 +8,7 @@ Requires: Python 3.9+; source markdown from the pdf-to-markdown step (with `<!--
 # Literature notes
 
 One note per source at `01_notes/lit/<citekey>.md`. Template: `template.md` beside this SKILL.md.
-The project root is the folder above `01_notes/`; keep notes in real (non-symlinked) folders under it.
+The project root is the folder above `01_notes/`; keep notes in real (non-symlinked) folders under it. Do not nest a project under a folder named `01_notes`. The source hash/manifest catches accidental edits; it is not protection against someone with write access to the project's own `02_sources/`.
 Source markdown carries page markers of the form `<!-- page N -->`; quote pages refer to them.
 
 1. Pick the source markdown file(s) in `02_sources/` and a citekey for each (match `07_references/references.bib` if the entry exists).

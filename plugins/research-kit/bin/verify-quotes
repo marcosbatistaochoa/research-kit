@@ -323,6 +323,9 @@ def check_note_full(note: Path, strict=False):
     if not inside(note, project_root(note)):
         return [(False, f"{name}: note (or its folder) resolves outside the project, e.g. via a symlink; "
                         "symlinked note folders are not supported, keep notes inside 01_notes/")], 0, None, None
+    if project_root(Path(os.path.realpath(note))).resolve() != project_root(note).resolve():
+        return [(False, f"{name}: note path resolves to a different project, e.g. via a symlink; "
+                        "keep notes in real folders under the project's 01_notes/")], 0, None, None
     if strict and not under_notes(note):
         return [(False, f"{name}: note is not under <root>/01_notes/")], 0, None, None
     ck, ref = str(meta.get("citekey", "")), str(meta.get("source_md", ""))
