@@ -3,6 +3,7 @@
 Every bypass test asserts the SECURE behaviour (non-zero exit / FAIL / UNVERIFIED).
 Controls (genuine quotes) must keep passing.
 """
+import os
 import shutil
 import subprocess
 import sys
@@ -22,9 +23,9 @@ SRC_MD = ROOT / "examples/basic/02_sources/md/lei2023financial.md"
 
 
 class Bypass(unittest.TestCase):
-    def project(self, note=None, draft=None, key=None):
+    def project(self, note=None, draft=None, key=None, parent=None):
         """Temp project with Lei's source md, one fixture note (saved as <key>.md) and a draft."""
-        t = tempfile.TemporaryDirectory()
+        t = tempfile.TemporaryDirectory(dir=parent)
         self.addCleanup(t.cleanup)
         root = Path(t.name)
         (root / "02_sources/md").mkdir(parents=True)
@@ -37,7 +38,8 @@ class Bypass(unittest.TestCase):
         return root
 
     def run_tool(self, tool, root, target, *flags):
-        return subprocess.run([sys.executable, str(BIN / tool), *flags, target], cwd=root,
+        env = {**os.environ, "PWD": str(root)}  # what a shell would export for this cwd
+        return subprocess.run([sys.executable, str(BIN / tool), *flags, target], cwd=root, env=env,
                               capture_output=True, text=True, encoding="utf-8", errors="replace")
 
     def verify(self, note, key=None):
@@ -409,8 +411,10 @@ class Bypass(unittest.TestCase):
         (root / "10_paper/01_notes/lit/lei2023financial.md").write_text(note, encoding="utf-8")
         (root / "10_paper/ch.md").write_text(f'Lei writes "{self.F}" [@lei2023financial].\n', encoding="utf-8")
         r = self.run_tool("check-claims", root, "10_paper/ch.md", "--strict-quotes")
+        self.assertEqual(r.returncode, 2, r.stdout)
+        r = self.run_tool("check-claims", root, "10_paper/ch.md", "--strict-quotes", "--root", str(root))
         self.assertEqual(r.returncode, 1, r.stdout)
-        r = self.run_tool("check-claims", root, "10_paper/ch.md")
+        r = self.run_tool("check-claims", root, "10_paper/ch.md", "--root", str(root))
         self.assertNotIn("| OK |", r.stdout)
         self.assertIn("UNVERIFIED", r.stdout)
 
@@ -462,6 +466,85 @@ class Bypass(unittest.TestCase):
         self.assertEqual(vq.project_root(root / "01_notes/lit/sub/lei2023financial.md"), root)
         r = self.run_tool("verify-quotes", root, "01_notes/lit/sub/lei2023financial.md", "--strict")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    # notes folder: exactly one candidate, or fail (no ordering among candidates)
+    def planted_parent(self):
+        """(sandbox S holding a forged pair + note, genuine project P inside S, draft quoting the forgery)."""
+        sandbox = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, sandbox, True)
+        self.forged_pair(sandbox)
+        (sandbox / "01_notes/lit").mkdir(parents=True, exist_ok=True)
+        note = (FIX / "notes/lei2023financial.md").read_text(encoding="utf-8").replace(
+            "Conversely, Zeev (2019) underscores that freely depreciating exchange rates can spur exports", self.F)
+        (sandbox / "01_notes/lit/lei2023financial.md").write_text(note, encoding="utf-8")
+        root = self.project("lei2023financial", parent=sandbox)
+        return sandbox, root
+
+    def test_planted_parent_pair_is_ambiguous(self):
+        _, root = self.planted_parent()
+        (root / "10_paper").mkdir()
+        for d in ("ch.md", "10_paper/ch.md"):
+            (root / d).write_text(f'Lei writes "{self.F}" [@lei2023financial].\n', encoding="utf-8")
+            r = self.run_tool("check-claims", root, d, "--strict-quotes")
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn("ambiguous notes folder", r.stderr)
+            self.assertNotIn("|", r.stdout)
+        r = self.run_tool("check-claims", root, "ch.md", "--strict-quotes", "--root", str(root))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("UNVERIFIED", r.stdout)
+        self.assertIn(f"notes: {root / '01_notes/lit'}", r.stderr)
+
+    def test_stray_empty_parent_notes_folder_is_ambiguous_not_silent(self):
+        sandbox = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, sandbox, True)
+        (sandbox / "01_notes/lit").mkdir(parents=True)
+        root = self.project("lei2023financial", "genuine", parent=sandbox)
+        r = self.run_tool("check-claims", root, "draft.md")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        r = self.run_tool("check-claims", root, "draft.md", "--root", str(root))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_external_draft_with_own_notes_is_ambiguous(self):
+        root = self.project("lei2023financial")
+        ext = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, ext, True)
+        self.forged_pair(ext / "collab")
+        (ext / "collab/01_notes/lit").mkdir(parents=True)
+        note = (FIX / "notes/lei2023financial.md").read_text(encoding="utf-8").replace(
+            "Conversely, Zeev (2019) underscores that freely depreciating exchange rates can spur exports", self.F)
+        (ext / "collab/01_notes/lit/lei2023financial.md").write_text(note, encoding="utf-8")
+        draft = ext / "collab/ch.md"
+        draft.write_text(f'Lei writes "{self.F}" [@lei2023financial].\n', encoding="utf-8")
+        r = self.run_tool("check-claims", root, str(draft), "--strict-quotes")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        r = self.run_tool("check-claims", root, str(draft), "--strict-quotes", "--root", str(root))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+    def test_symlinked_paper_dir_with_pair_never_ok(self):
+        root = self.project("lei2023financial")
+        ext = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, ext, True)
+        self.forged_pair(ext)
+        (ext / "01_notes/lit").mkdir(parents=True)
+        note = (FIX / "notes/lei2023financial.md").read_text(encoding="utf-8").replace(
+            "Conversely, Zeev (2019) underscores that freely depreciating exchange rates can spur exports", self.F)
+        (ext / "01_notes/lit/lei2023financial.md").write_text(note, encoding="utf-8")
+        (root / "10_paper").symlink_to(ext, target_is_directory=True)
+        (ext / "ch.md").write_text(f'Lei writes "{self.F}" [@lei2023financial].\n', encoding="utf-8")
+        r = self.run_tool("check-claims", root / "10_paper", "ch.md", "--strict-quotes")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertNotIn("| OK |", r.stdout)
+
+    def test_root_must_hold_notes(self):
+        root = self.project("lei2023financial", "genuine")
+        r = self.run_tool("check-claims", root, "draft.md", "--root", str(root / "nope"))
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+
+    def test_control_single_candidate_found_and_reported(self):
+        root = self.project("lei2023financial", "genuine")
+        r = self.run_tool("check-claims", root, "draft.md")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("notes: ", r.stderr)
 
     def test_short_quotes_add_up(self):
         self.assertUnverified('Lei [@lei2023financial] says "always rescue" and "labor markets" and "every crisis".\n')

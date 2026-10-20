@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Check that every cited paragraph in a draft is backed by notes whose quotes verify.
 
-Usage: check-claims [--strict-quotes] <draft.md>
+Usage: check-claims [--strict-quotes] [--root <project>] <draft.md>
 
 Finds paragraphs carrying a pandoc citation ([@key], [@a; @b], [@{key}], narrative @key) and maps
-each key to 01_notes/lit/<key>.md (looked up from the draft's directory upwards, then the current
-directory). Code, HTML comments, URLs and emails are ignored. Every cited note is run through
+each key to <project>/01_notes/lit/<key>.md. With --root the project is given. Without it, every folder
+that holds 01_notes/lit among the draft's ancestors (lexical and physical path) and the current directory
+is a candidate: exactly one is used, none means no notes, more than one is an error (exit 2, pass --root).
+The notes folder used is printed to stderr as `notes: <path>`. Code, HTML comments, URLs and emails are ignored. Every cited note is run through
 verify-quotes' checks (strict about md_sha256 when 02_sources/manifest.csv records it).
 Prints a markdown table with one row per (paragraph, key):
   OK          the note exists, has quotes, and every quote verifies against its source
@@ -23,7 +25,7 @@ A block is a paragraph plus what belongs to it: a blockquote next to it, the foo
 points to, and the list or paragraph after a line ending in ":". Quotations are "", “”, „“, ‚‘, ‘’,
 «», »«, ‹›, 「」, 『』, <q>, <blockquote> and `>` lines. Unquoted paraphrase is not judged.
 Exits 1 if any note-level row is UNVERIFIED, or no citation is recognised (with --strict-quotes
-also if any advisory row); 2 on usage error.
+also if any advisory row); 2 on usage error or an ambiguous notes folder.
 No model calls, no network. Needs verify-quotes in the same directory.
 """
 from __future__ import annotations
@@ -72,14 +74,24 @@ def load_vq():
     return mod
 
 
-def note_dir(draft: Path) -> Path | None:
-    """Notes folder of the OUTERMOST ancestor of the draft (absolute, unresolved) holding 01_notes/lit;
-    cwd only if none does. Same principle as verify-quotes: a planted nearer 01_notes/lit never wins."""
-    here = Path(os.path.abspath(draft)).parent
-    for base in [*reversed(here.parents), here, Path.cwd()]:
-        if (base / "01_notes/lit").is_dir():
-            return base / "01_notes/lit"
-    return None
+def note_candidates(draft: Path) -> dict[Path, Path]:
+    """Every distinct (resolved) <B>/01_notes/lit directory for B in the draft's ancestors, taken lexically
+    (unresolved) and physically (realpath), and the current directory taken both ways. No ordering is
+    applied: the caller accepts exactly one, so no planted folder can win by position."""
+    cwd = Path(os.getcwd())
+    pwd = os.environ.get("PWD")
+    cwds = [cwd]
+    if pwd and os.path.isabs(pwd) and os.path.realpath(pwd) == os.path.realpath(cwd):
+        cwds.append(Path(pwd))  # the shell's (possibly symlinked) view of the cwd
+    here = [Path(os.path.abspath(c / draft)).parent for c in cwds]  # relative drafts: both views of the cwd
+    here += [Path(os.path.realpath(draft)).parent, Path(os.path.realpath(here[0]))]
+    bases = [b for h in here for b in (h, *h.parents)] + cwds
+    found: dict[Path, Path] = {}  # resolved -> first (unresolved) path, which is what verify-quotes must see
+    for b in bases:
+        lit = b / "01_notes/lit"
+        if lit.is_dir():
+            found.setdefault(lit.resolve(), lit)
+    return found
 
 
 def _blank(m: re.Match) -> str:
@@ -262,10 +274,22 @@ def main(argv: list[str]) -> int:
     if any(a in ("-h", "--help") for a in argv[1:]):
         print(__doc__ + "Requires: python3 >= 3.9 (stdlib only).")
         return 0
-    strict_quotes = "--strict-quotes" in argv[1:]
-    args = [a for a in argv[1:] if a != "--strict-quotes"]
+    usage = "usage: check-claims [--strict-quotes] [--root <project>] <draft.md>"
+    strict_quotes, root_arg, args, it = False, None, [], iter(argv[1:])
+    for a in it:
+        if a == "--strict-quotes":
+            strict_quotes = True
+        elif a == "--root":
+            root_arg = next(it, None)
+            if root_arg is None:
+                print(usage, file=sys.stderr)
+                return 2
+        elif a.startswith("--root="):
+            root_arg = a[7:]
+        else:
+            args.append(a)
     if len(args) != 1:
-        print("usage: check-claims [--strict-quotes] <draft.md>", file=sys.stderr)
+        print(usage, file=sys.stderr)
         return 2
     draft = Path(args[0])
     try:
@@ -277,7 +301,19 @@ def main(argv: list[str]) -> int:
     except (OSError, ImportError) as e:
         print(f"check-claims: cannot read draft or verify-quotes: {e}", file=sys.stderr)
         return 2
-    notes = note_dir(draft)
+    if root_arg is not None:
+        notes = Path(os.path.abspath(root_arg)) / "01_notes/lit"
+        if not notes.is_dir():
+            print(f"check-claims: --root {root_arg}: {notes} is not a directory", file=sys.stderr)
+            return 2
+    else:
+        cands = note_candidates(draft)
+        if len(cands) > 1:
+            print("check-claims: ambiguous notes folder: " + ", ".join(str(c) for c in cands)
+                  + " -- pass --root <project>", file=sys.stderr)
+            return 2
+        notes = next(iter(cands.values())) if cands else None
+    print(f"notes: {notes if notes else '(none found)'}", file=sys.stderr)
     cache: dict = {}
 
     def note_state(k: str):
@@ -291,6 +327,9 @@ def main(argv: list[str]) -> int:
         elif path is not None and path.is_file():
             results, nq, src, nosrc = vq.check_note_full(path, "auto")
             bad = [m for ok, m in results if not ok]
+            if vq.project_root(path).resolve() != notes.parent.parent.resolve():
+                bad.append(f"{k}.md: verify-quotes would use a different project root "
+                           f"({vq.project_root(path)}) than the notes folder's project; pass --root")
             whole = None
             if src is not None:
                 try:

@@ -19,8 +19,11 @@ Order matters: mechanical checks first, model judgment second, adversary last. R
 2. Map citations to notes:
 
    ```
-   check-claims [--strict-quotes] <draft.md>
+   check-claims [--strict-quotes] [--root <project>] <draft.md>
    ```
+
+   It finds the project's `01_notes/lit` itself; if it reports an ambiguous notes folder (another
+   `01_notes/lit` above the project or next to the draft), pass `--root <project>`.
 
    If not on PATH, run it from the kit's plugins/research-kit/bin/. It prints a markdown table:
    OK, NO-SOURCE, UNSOURCED, UNCITED, or UNVERIFIED with the reason (no note, a note without quotes, a quote that fails

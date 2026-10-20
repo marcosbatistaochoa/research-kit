@@ -8,11 +8,16 @@
 
 ## Unreleased
 
-- `check-claims`: the notes folder is the `01_notes/lit` of the OUTERMOST ancestor of the draft (path names only),
-  so a `01_notes/lit` + `02_sources` planted next to the draft cannot replace the real ones. `verify-quotes`
-  rejects a note whose real path leads to a different project than its given path (e.g. via a symlink).
-  Do not nest a project under a folder named `01_notes`. The source hash and manifest catch accidental edits;
-  they do not protect against someone with write access to the project's own `02_sources/`.
+- `check-claims`: the notes folder is never chosen by position. New `--root <project>` names the project
+  (notes = `<project>/01_notes/lit`). Without it, every `01_notes/lit` found in the draft's ancestors (lexical and
+  physical path) and the current directory is a candidate; exactly one is used, none means "no notes", and more
+  than one stops the run with exit 2 ("ambiguous notes folder ... pass --root <project>"). An enclosing project,
+  or a stray `/tmp/01_notes/lit`, therefore makes check-claims ask for `--root` instead of trusting either folder.
+  The notes folder used is printed to stderr (`notes: <path>`). `verify-quotes` rejects a note whose real path
+  leads to a different project than its given path, and therefore a symlinked `01_notes/lit`
+  (behaviour change: keep notes in real folders). Do not nest a project under a folder named `01_notes`.
+  The source hash and manifest catch accidental edits; they do not protect against someone with write access
+  to the project's own `02_sources/`.
 - `check-claims`: draft-quote findings (UNCITED rows, and UNVERIFIED rows caused only by a quotation in
   the draft) are advisory by default: printed as `UNVERIFIED (advisory)` / `UNCITED (advisory)` with an
   `advisory:` line, exit 0. `--strict-quotes` makes them fail. Note-level failures still always exit 1.
