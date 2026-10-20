@@ -19,7 +19,7 @@ Order matters: mechanical checks first, model judgment second, adversary last. R
 2. Map citations to notes:
 
    ```
-   check-claims <draft.md>
+   check-claims [--strict-quotes] <draft.md>
    ```
 
    If not on PATH, run it from the kit's plugins/research-kit/bin/. It prints a markdown table:
@@ -34,8 +34,14 @@ Order matters: mechanical checks first, model judgment second, adversary last. R
    source (own interview, own translation, epigraph, hypothesis box) is exempted with a line
    `<!-- unsourced: <reason> -->` directly before its paragraph or blockquote; check-claims then lists it
    as UNSOURCED. The marker never exempts a citation: cited keys still need their note.
-   Resolve UNVERIFIED and UNCITED rows before the model passes: write or fix the note, fix the quote,
-   cite the right source, or mark the block unsourced. Never delete a citation just to silence a quote row.
+   Exit status: note-level failures (no note, a failing note, a note without quotes, no citation) always
+   exit 1. Draft-quote findings (UNCITED, and UNVERIFIED caused by a quotation in the draft) rely on a
+   heuristic quote extractor, so they are printed as `UNVERIFIED (advisory)` / `UNCITED (advisory)` with an
+   `advisory:` line, and exit 0; pass `--strict-quotes` to make them fail. An advisory row is not a pass:
+   read it and check the quotation by hand.
+   Resolve note-level UNVERIFIED rows before the model passes: write or fix the note. Check advisory rows:
+   fix the quote or cite the right source; use `<!-- unsourced: <reason> -->` only for a quotation that is
+   genuinely not from any source (see above). Never delete a citation just to silence a quote row.
 3. Delegate to the `claim-checker` agent with the cited sentences and keys. It judges each sentence against its note only
    (SUPPORTED / PARTIAL / NOT SUPPORTED / NOT ASSESSED, plus the quote relied on).
 4. Delegate to the `skeptic` agent, which tries to refute the 3 strongest claims, each finding with an evidence anchor.

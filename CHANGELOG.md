@@ -8,6 +8,12 @@
 
 ## Unreleased
 
+- `check-claims`: draft-quote findings (UNCITED rows, and UNVERIFIED rows caused only by a quotation in
+  the draft) are advisory by default: printed as `UNVERIFIED (advisory)` / `UNCITED (advisory)` with an
+  `advisory:` line, exit 0. `--strict-quotes` makes them fail. Note-level failures still always exit 1.
+- `verify-quotes`: the project root comes from the note and is the outermost ancestor holding
+  `02_sources/` (a planted `01_notes/02_sources/` no longer shadows it); under `--strict` a source md in a
+  subdirectory of `02_sources/md/` fails.
 - 2026-10-15: Documentation only. README restructured with banner, terminal
   transcript and plugin tables per the public repository template; `tools/banner`
   added for regenerating the images. Plugin version stayed 0.1.1 at that point.
