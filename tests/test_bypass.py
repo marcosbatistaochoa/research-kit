@@ -376,6 +376,57 @@ class Bypass(unittest.TestCase):
         (root / "draft.md").write_text("Lei [@lei2023financial].\n", encoding="utf-8")
         self.assertNotEqual(self.run_tool("check-claims", root, "draft.md").returncode, 0)
 
+    def forged_pair(self, base):
+        """Plant an empty 01_notes/ and a forged, hash-consistent 02_sources/ inside base."""
+        (base / "01_notes").mkdir(parents=True)
+        (base / "02_sources/md").mkdir(parents=True)
+        forged = SRC_MD.read_text(encoding="utf-8") + f"\n<!-- page 3 -->\n{self.F}.\n"
+        h = vq.body_hash(forged)
+        forged = "".join(f"md_sha256: {h}\n" if l.startswith("md_sha256:") else l for l in forged.splitlines(True))
+        (base / "02_sources/md/lei2023financial.md").write_text(forged, encoding="utf-8", newline="\n")
+        (base / "02_sources/manifest.csv").write_text(f"stem,md_sha256\nlei2023financial,{h}\n", encoding="utf-8")
+
+    def test_planted_pair_inside_notes_cannot_pick_root(self):
+        root = self.project("lei2023financial")
+        self.forged_pair(root / "01_notes/lit")
+        note = (FIX / "notes/lei2023financial.md").read_text(encoding="utf-8").replace(
+            "Conversely, Zeev (2019) underscores that freely depreciating exchange rates can spur exports", self.F)
+        (root / "01_notes/lit/lei2023financial.md").write_text(note, encoding="utf-8")
+        (root / "draft.md").write_text(f'Lei writes "{self.F}" [@lei2023financial].\n', encoding="utf-8")
+        self.assertEqual(vq.project_root(root / "01_notes/lit/lei2023financial.md"), root)
+        r = self.run_tool("verify-quotes", root, "01_notes/lit/lei2023financial.md", "--strict")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        r = self.run_tool("check-claims", root, "draft.md", "--strict-quotes")
+        self.assertEqual(r.returncode, 1, r.stdout)
+
+    def test_strict_note_outside_01_notes_fails(self):
+        root = self.project("lei2023financial")
+        shutil.move(str(root / "01_notes/lit"), str(root / "elsewhere"))
+        r = self.run_tool("verify-quotes", root, "elsewhere/lei2023financial.md", "--strict")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("not under", r.stdout)
+
+    def test_control_symlinked_sources_dir(self):
+        for sub in ("02_sources", "02_sources/md"):
+            root = self.project("lei2023financial", "genuine")
+            ext = Path(tempfile.mkdtemp())
+            self.addCleanup(shutil.rmtree, ext, True)
+            target = root / sub
+            shutil.move(str(target), str(ext / "store"))
+            target.symlink_to(ext / "store", target_is_directory=True)
+            r = self.run_tool("verify-quotes", root, "01_notes/lit/lei2023financial.md", "--strict")
+            self.assertEqual(r.returncode, 0, sub + r.stdout + r.stderr)
+            r = self.run_tool("check-claims", root, "draft.md")
+            self.assertEqual(r.returncode, 0, sub + r.stdout + r.stderr)
+
+    def test_control_note_in_nested_folder_resolves_root(self):
+        root = self.project("lei2023financial", "genuine")
+        (root / "01_notes/lit/sub").mkdir()
+        shutil.move(str(root / "01_notes/lit/lei2023financial.md"), str(root / "01_notes/lit/sub"))
+        self.assertEqual(vq.project_root(root / "01_notes/lit/sub/lei2023financial.md"), root)
+        r = self.run_tool("verify-quotes", root, "01_notes/lit/sub/lei2023financial.md", "--strict")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
     def test_short_quotes_add_up(self):
         self.assertUnverified('Lei [@lei2023financial] says "always rescue" and "labor markets" and "every crisis".\n')
 

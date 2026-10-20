@@ -218,13 +218,19 @@ def md_meta(text: str) -> tuple[dict, str]:
 
 
 def project_root(note: Path) -> Path:
-    """Nearest ancestor of the note (path as given, symlinks NOT resolved) holding both 01_notes/ and
-    02_sources/; else the note's grandparent's parent. A symlinked note is then caught by inside()."""
+    """Parent of the OUTERMOST path component named 01_notes in the note's absolute, unresolved path.
+    Only path components are read, never directory contents, so planted folders cannot move the root.
+    No such component: the note's grandparent's parent (strict mode rejects that, see check_note_full)."""
     here = Path(os.path.abspath(note)).parent
-    for d in (here, *here.parents):
-        if (d / "01_notes").is_dir() and (d / "02_sources").is_dir():
-            return d
+    for d in (*reversed(here.parents), here):
+        if d.name == "01_notes":
+            return d.parent
     return here.parent.parent
+
+
+def under_notes(note: Path) -> bool:
+    """The note's absolute, unresolved path has a 01_notes component."""
+    return "01_notes" in Path(os.path.abspath(note)).parent.parts
 
 
 def inside(path: Path, root: Path) -> bool:
@@ -241,7 +247,7 @@ def find_source(note: Path, ref: str) -> Path | None:
 
 def in_sources(note: Path, src: Path) -> bool:
     root = project_root(note)
-    return inside(src, root) and src.resolve().is_relative_to((root / "02_sources" / "md").resolve())
+    return src.resolve().is_relative_to((root / "02_sources" / "md").resolve())
 
 
 def manifest_rows(root: Path):
@@ -315,7 +321,10 @@ def check_note_full(note: Path, strict=False):
         return [(False, f"{name}: cannot read note ({e})")], 0, None, None
     out: list[tuple[bool, str]] = []
     if not inside(note, project_root(note)):
-        return [(False, f"{name}: note resolves outside the project (symlink?); keep notes inside 01_notes/")], 0, None, None
+        return [(False, f"{name}: note (or its folder) resolves outside the project, e.g. via a symlink; "
+                        "symlinked note folders are not supported, keep notes inside 01_notes/")], 0, None, None
+    if strict and not under_notes(note):
+        return [(False, f"{name}: note is not under <root>/01_notes/")], 0, None, None
     ck, ref = str(meta.get("citekey", "")), str(meta.get("source_md", ""))
     if ref.lower() == "none":  # software, dataset, print book: nothing to quote
         why = str(meta.get("no_source", "")).strip()

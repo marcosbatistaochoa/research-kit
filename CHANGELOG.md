@@ -11,9 +11,11 @@
 - `check-claims`: draft-quote findings (UNCITED rows, and UNVERIFIED rows caused only by a quotation in
   the draft) are advisory by default: printed as `UNVERIFIED (advisory)` / `UNCITED (advisory)` with an
   `advisory:` line, exit 0. `--strict-quotes` makes them fail. Note-level failures still always exit 1.
-- `verify-quotes`: the project root comes from the note and is the outermost ancestor holding
-  `02_sources/` (a planted `01_notes/02_sources/` no longer shadows it); under `--strict` a source md in a
-  subdirectory of `02_sources/md/` fails.
+- `verify-quotes`: the project root is the folder above the outermost `01_notes/` in the note's path (only
+  path names are read, never folder contents, so planted folders cannot move it); a strict check of a note
+  not under `01_notes/` fails. A source md in a subdirectory of `02_sources/md/` now fails in every mode.
+  A note whose folder is a symlink leading outside the project is rejected (symlinked note folders are not
+  supported); a symlinked `02_sources/` or `02_sources/md` still works.
 - 2026-10-15: Documentation only. README restructured with banner, terminal
   transcript and plugin tables per the public repository template; `tools/banner`
   added for regenerating the images. Plugin version stayed 0.1.1 at that point.
