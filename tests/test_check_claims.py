@@ -21,7 +21,7 @@ BAD_QUOTE = OK_NOTE.replace("evolved over many centuries", "invented by aliens i
 
 
 class CheckClaims(unittest.TestCase):
-    def run_draft(self, draft, notes):
+    def run_draft(self, draft, notes, *flags):
         with tempfile.TemporaryDirectory() as t:
             root = Path(t)
             (root / "01_notes/lit").mkdir(parents=True)
@@ -31,7 +31,7 @@ class CheckClaims(unittest.TestCase):
                 if "source_md: none" not in body:
                     (root / f"02_sources/md/{k}.md").write_text(SOURCE.format(k=k), encoding="utf-8")
             (root / "10_draft.md").write_text(draft, encoding="utf-8")
-            return subprocess.run([sys.executable, str(TOOL), str(root / "10_draft.md")],
+            return subprocess.run([sys.executable, str(TOOL), *flags, str(root / "10_draft.md")],
                                   capture_output=True, text=True, encoding="utf-8", errors="replace")
 
     def row(self, r, key):
@@ -77,10 +77,17 @@ class CheckClaims(unittest.TestCase):
     def test_draft_quote_must_be_in_source(self):
         r = self.run_draft('Money is "a social convention that evolved" [@a].\n', {"a": OK_NOTE})
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        r = self.run_draft('Money is \u201ca social convention that never evolved\u201d [@a].\n', {"a": OK_NOTE})
+        d = 'Money is \u201ca social convention that never evolved\u201d [@a].\n'
+        r = self.run_draft(d, {"a": OK_NOTE}, "--strict-quotes")
         self.assertEqual(r.returncode, 1)
         self.assertIn("UNVERIFIED", self.row(r, "a"))
+        self.assertNotIn("(advisory)", r.stdout)
         self.assertIn("never evolved", r.stdout)
+        r = self.run_draft(d, {"a": OK_NOTE})
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("UNVERIFIED (advisory)", self.row(r, "a"))
+        self.assertIn("run with --strict-quotes to make it fail", r.stdout)
+        self.assertIn("0 row(s) not OK; 1 advisory", r.stdout)
 
     def test_period_inside_draft_quote_does_not_split(self):
         r = self.run_draft('The text says "Prices rise. Inflation is always" [@a].\n', {"a": OK_NOTE})
@@ -92,7 +99,7 @@ class CheckClaims(unittest.TestCase):
         r = self.run_draft("We use the tool [@a]. See [@b].\n", {"a": ns, "b": OK_NOTE})
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("NO-SOURCE", self.row(r, "a"))
-        r = self.run_draft('The tool says "Money is a social convention that evolved" [@a].\n', {"a": ns})
+        r = self.run_draft('The tool says "Money is a social convention that evolved" [@a].\n', {"a": ns}, "--strict-quotes")
         self.assertEqual(r.returncode, 1)
         self.assertIn("UNVERIFIED", self.row(r, "a"))
 
@@ -131,24 +138,24 @@ class CheckClaims(unittest.TestCase):
         for q in [base + ",", base.replace("Money", "money"), "Money is ... evolved over many centuries",
                   "[M]oney is a social convention that evolved", "Money is a social [convention] that evolved over",
                   ]:
-            r = self.run_draft(f'Text "{q}" [@a].\n', {"a": OK_NOTE})
+            r = self.run_draft(f'Text "{q}" [@a].\n', {"a": OK_NOTE}, "--strict-quotes")
             self.assertEqual(r.returncode, 0, q + r.stdout)
         # scare quotes and inch marks are not judged
         r = self.run_draft('A "so called" thing and a 12" ruler [@a].\n', {"a": OK_NOTE})
         self.assertEqual(r.returncode, 0, r.stdout)
         # order matters
-        r = self.run_draft('Text "evolved over many centuries ... Money is a social convention" [@a].\n', {"a": OK_NOTE})
+        r = self.run_draft('Text "evolved over many centuries ... Money is a social convention" [@a].\n', {"a": OK_NOTE}, "--strict-quotes")
         self.assertEqual(r.returncode, 1)
         self.assertIn("check ellipsis/brackets/case", r.stdout)
 
     def test_unbalanced_quote_fails(self):
-        r = self.run_draft('He wrote \u201cMoney is invented by aliens in space [@a].\n', {"a": OK_NOTE})
+        r = self.run_draft('He wrote \u201cMoney is invented by aliens in space [@a].\n', {"a": OK_NOTE}, "--strict-quotes")
         self.assertEqual(r.returncode, 1)
         self.assertIn("unbalanced", r.stdout)
 
     def test_uncited_quote_is_flagged_unless_marked(self):
         q = '"Money is a social convention that evolved"'
-        r = self.run_draft(f"Cited [@a].\n\nAn aside {q} appears here.\n", {"a": OK_NOTE})
+        r = self.run_draft(f"Cited [@a].\n\nAn aside {q} appears here.\n", {"a": OK_NOTE}, "--strict-quotes")
         self.assertEqual(r.returncode, 1)
         self.assertIn("UNCITED", r.stdout)
         r = self.run_draft(f"Cited [@a].\n\n<!-- unsourced: own interview -->\nAn aside {q} appears here.\n", {"a": OK_NOTE})
@@ -156,7 +163,7 @@ class CheckClaims(unittest.TestCase):
         self.assertIn("UNSOURCED", r.stdout)
         self.assertIn("own interview", r.stdout)
         # empty reason: ignored
-        r = self.run_draft(f"Cited [@a].\n\n<!-- unsourced: -->\nAn aside {q} appears here.\n", {"a": OK_NOTE})
+        r = self.run_draft(f"Cited [@a].\n\n<!-- unsourced: -->\nAn aside {q} appears here.\n", {"a": OK_NOTE}, "--strict-quotes")
         self.assertEqual(r.returncode, 1)
         # marker exempts quotes, never citations
         r = self.run_draft('<!-- unsourced: hypothesis box -->\nHe said "never ever verified anywhere" [@ghost].\n', {"a": OK_NOTE})
@@ -175,7 +182,7 @@ class CheckClaims(unittest.TestCase):
 
     def test_no_source_quote_message(self):
         ns = '---\ncitekey: {k}\nsource_md: none\nno_source: print book\nclaims:\n  - "x"\nquotes: []\n---\n'
-        r = self.run_draft('He wrote "never ever verified anywhere at all" [@a].\n', {"a": ns})
+        r = self.run_draft('He wrote "never ever verified anywhere at all" [@a].\n', {"a": ns}, "--strict-quotes")
         self.assertEqual(r.returncode, 1)
         self.assertIn("no source text for a (NO-SOURCE)", r.stdout)
 

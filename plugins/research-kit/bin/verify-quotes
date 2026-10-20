@@ -217,12 +217,11 @@ def md_meta(text: str) -> tuple[dict, str]:
 
 
 def project_root(note: Path) -> Path:
-    """Nearest ancestor of the note holding 02_sources/; else the note's grandparent's parent."""
+    """OUTERMOST ancestor of the note holding 02_sources/ (a planted 01_notes/02_sources cannot
+    shadow the real one); else the note's grandparent's parent."""
     here = note.resolve().parent
-    for d in (here, *here.parents):
-        if (d / "02_sources").is_dir():
-            return d
-    return here.parent.parent
+    found = [d for d in (here, *here.parents) if (d / "02_sources").is_dir()]
+    return found[-1] if found else here.parent.parent
 
 
 def find_source(note: Path, ref: str) -> Path | None:
@@ -251,9 +250,10 @@ def manifest_rows(root: Path):
     return rows, names, not names
 
 
-def manifest_hash(src: Path):
-    """(manifest records md_sha256 or is broken, that md's last recorded hash or None, broken)."""
-    rows, names, broken = manifest_rows(src.resolve().parent.parent.parent)
+def manifest_hash(src: Path, root: Path):
+    """(manifest records md_sha256 or is broken, that md's last recorded hash or None, broken).
+    root: the project root, taken from the note."""
+    rows, names, broken = manifest_rows(root)
     if broken:
         return True, None, True
     if rows is None or "md_sha256" not in names:
@@ -262,15 +262,20 @@ def manifest_hash(src: Path):
     return True, ((hits[-1].get("md_sha256") or "").strip().lower() if hits else None), False
 
 
-def load_source(src: Path, citekey: str, strict=False) -> tuple[dict[int, set], str, list[str]]:
+def load_source(src: Path, citekey: str, strict=False, root: Path | None = None) -> tuple[dict[int, set], str, list[str]]:
     """(page -> variants, whole-body text, problems). strict: True, False or "auto" (strict when the
-    project manifest records md_sha256). Raises ValueError if unreadable."""
+    project manifest records md_sha256). root: project root (project_root(note)).
+    Raises ValueError if unreadable."""
     text = read_utf8(src)
     fm, body = md_meta(text)
     problems = []
-    has_col, mval, broken = manifest_hash(src)
+    if root is None:
+        root = src.resolve().parent.parent.parent
+    has_col, mval, broken = manifest_hash(src, root)
     if strict == "auto":
         strict = has_col
+    if strict and src.resolve().parent != (root / "02_sources" / "md").resolve():
+        problems.append(f"{src.name} must sit directly in 02_sources/md/ (not a subdirectory)")
     want = fm.get("md_sha256", "").lower()
     if strict and broken:
         problems.append("02_sources/manifest.csv exists but cannot be read; fix it or re-run pdf2md --force")
@@ -336,7 +341,7 @@ def check_note_full(note: Path, strict=False):
     if not in_sources(note, src):
         return out + [(False, f"{name}: source_md must be a file under 02_sources/md/ (got {ref!r})")], len(quotes), None, None
     try:
-        pages, _, problems = load_source(src, ck, strict)
+        pages, _, problems = load_source(src, ck, strict, project_root(note))
     except (OSError, ValueError) as e:
         return out + [(False, f"{name}: cannot read source md {src.name} ({e})")], len(quotes), src, None
     out += [(False, f"{name}: {p}") for p in problems]

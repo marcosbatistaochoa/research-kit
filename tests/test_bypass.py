@@ -36,17 +36,17 @@ class Bypass(unittest.TestCase):
             shutil.copy(FIX / "drafts" / f"{draft}.md", root / "draft.md")
         return root
 
-    def run_tool(self, tool, root, target):
-        return subprocess.run([sys.executable, str(BIN / tool), target], cwd=root,
+    def run_tool(self, tool, root, target, *flags):
+        return subprocess.run([sys.executable, str(BIN / tool), *flags, target], cwd=root,
                               capture_output=True, text=True, encoding="utf-8", errors="replace")
 
     def verify(self, note, key=None):
         root = self.project(note, key=key)
         return self.run_tool("verify-quotes", root, f"01_notes/lit/{key or note}.md")
 
-    def claims(self, draft, note=None, key=None):
+    def claims(self, draft, note=None, key=None, *flags):
         root = self.project(note, draft, key)
-        return self.run_tool("check-claims", root, "draft.md")
+        return self.run_tool("check-claims", root, "draft.md", *flags)
 
     def assertRejected(self, r):
         self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -59,8 +59,8 @@ class Bypass(unittest.TestCase):
             (root / f"01_notes/lit/{k}.md").write_text(text, encoding="utf-8")
         return root
 
-    def claims_text(self, draft, notes=None):
-        return self.run_tool("check-claims", self.project_text(draft, notes), "draft.md")
+    def claims_text(self, draft, notes=None, *flags):
+        return self.run_tool("check-claims", self.project_text(draft, notes), "draft.md", *flags)
 
     # controls: genuine material still passes
     def test_control_verify_quotes_genuine_passes(self):
@@ -99,8 +99,15 @@ class Bypass(unittest.TestCase):
         self.assertRejected(self.run_tool("check-claims", root, "draft.md"))
 
     def test_fabricated_quote_in_draft(self):
+        r = self.claims("fabricated_quote", "lei2023financial", None, "--strict-quotes")
+        self.assertNotEqual(r.returncode, 0, r.stdout)
+        self.assertIn("UNVERIFIED", r.stdout)
+        # without the flag the draft-quote finding is advisory: exit 0, but visibly not OK
         r = self.claims("fabricated_quote", "lei2023financial")
-        self.assertTrue(r.returncode != 0 or "UNVERIFIED" in r.stdout, r.stdout)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("UNVERIFIED (advisory)", r.stdout)
+        self.assertIn("advisory: draft-quote check is heuristic; run with --strict-quotes to make it fail", r.stdout)
+        self.assertIn("1 advisory", r.stdout)
 
     def test_draft_with_zero_recognised_citations(self):
         self.assertRejected(self.claims("zero_citations", "lei2023financial"))
@@ -111,7 +118,7 @@ class Bypass(unittest.TestCase):
     OTHER = ('---\ncitekey: other2020\nsource_md: none\nno_source: print book\nclaims:\n  - "x"\nquotes: []\n---\n')
 
     def assertUnverified(self, draft, notes=None):
-        r = self.claims_text(draft, notes)
+        r = self.claims_text(draft, notes, "--strict-quotes")
         self.assertNotEqual(r.returncode, 0, draft + r.stdout)
         self.assertIn("UNVERIFIED", r.stdout, draft)
 
@@ -137,7 +144,7 @@ class Bypass(unittest.TestCase):
 
     def test_real_quote_misattributed(self):
         self.assertUnverified(f'Others say "{self.REAL}" [@other2020].\n', {"other2020": self.OTHER})
-        r = self.claims_text(f'Others say "{self.REAL}" [@other2020; @lei2023financial].\n', {"other2020": self.OTHER})
+        r = self.claims_text(f'Others say "{self.REAL}" [@other2020; @lei2023financial].\n', {"other2020": self.OTHER}, "--strict-quotes")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("held by lei2023financial", r.stdout)
 
@@ -219,9 +226,13 @@ class Bypass(unittest.TestCase):
         self.assertUnverified(f'As Lei puts it [@lei2023financial]:\n\n"{self.F}."\n')
 
     def test_uncited_quote(self):
-        r = self.claims_text(f'Genuine [@lei2023financial, p. 3].\n\nSomeone said "{self.F}" once.\n')
+        d = f'Genuine [@lei2023financial, p. 3].\n\nSomeone said "{self.F}" once.\n'
+        r = self.claims_text(d, None, "--strict-quotes")
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("UNCITED", r.stdout)
+        r = self.claims_text(d)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("UNCITED (advisory)", r.stdout)
 
     def test_quote_inside_citation_brackets(self):
         for d in (f'[@lei2023financial, p. 9: "{self.F}"]', f'[as Lei puts it, \u201c{self.F}\u201d, @lei2023financial]',
@@ -258,6 +269,36 @@ class Bypass(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("converted copy", r.stdout)
         self.assertNotEqual(self.run_tool("check-claims", root, "draft.md").returncode, 0)
+
+    def test_subdirectory_forged_source_fails_strict(self):
+        root = self.hashed_project()
+        sub = root / "02_sources/md/x"
+        sub.mkdir()
+        forged = (root / "02_sources/md/lei2023financial.md").read_text(encoding="utf-8") + f"\n<!-- page 3 -->\n{self.F}.\n"
+        h = vq.body_hash(forged)
+        forged = "".join(f"md_sha256: {h}\n" if l.startswith("md_sha256:") else l for l in forged.splitlines(True))
+        (sub / "lei2023financial.md").write_text(forged, encoding="utf-8", newline="\n")
+        (root / "02_sources/manifest.csv").write_text(f"stem,md_sha256\nlei2023financial,{h}\n", encoding="utf-8")
+        note = (FIX / "notes/lei2023financial.md").read_text(encoding="utf-8").replace(
+            "02_sources/md/lei2023financial.md", "02_sources/md/x/lei2023financial.md").replace(
+            "Conversely, Zeev (2019) underscores that freely depreciating exchange rates can spur exports", self.F)
+        (root / "01_notes/lit/lei2023financial.md").write_text(note, encoding="utf-8")
+        r = self.run_tool("verify-quotes", root, "01_notes/lit/lei2023financial.md", "--strict")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("directly in 02_sources/md", r.stdout)
+        self.assertRejected(self.run_tool("check-claims", root, "draft.md"))
+
+    def test_planted_nested_sources_cannot_shadow_real_one(self):
+        root = self.project("lei2023financial")
+        (root / "01_notes/02_sources/md").mkdir(parents=True)
+        forged = SRC_MD.read_text(encoding="utf-8") + f"\n<!-- page 3 -->\n{self.F}.\n"
+        (root / "01_notes/02_sources/md/lei2023financial.md").write_text(forged, encoding="utf-8")
+        self.assertEqual(vq.project_root(root / "01_notes/lit/lei2023financial.md"), root.resolve())
+        note = (FIX / "notes/lei2023financial.md").read_text(encoding="utf-8").replace(
+            "02_sources/md/lei2023financial.md", "01_notes/02_sources/md/lei2023financial.md").replace(
+            "Conversely, Zeev (2019) underscores that freely depreciating exchange rates can spur exports", self.F)
+        (root / "01_notes/lit/lei2023financial.md").write_text(note, encoding="utf-8")
+        self.assertRejected(self.run_tool("verify-quotes", root, "01_notes/lit/lei2023financial.md"))
 
     def test_forged_source_outside_sources_and_broken_manifest(self):
         root = self.project("lei2023financial")

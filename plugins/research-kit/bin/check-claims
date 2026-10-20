@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check that every cited paragraph in a draft is backed by notes whose quotes verify.
 
-Usage: check-claims <draft.md>
+Usage: check-claims [--strict-quotes] <draft.md>
 
 Finds paragraphs carrying a pandoc citation ([@key], [@a; @b], [@{key}], narrative @key) and maps
 each key to 01_notes/lit/<key>.md (looked up from the draft's directory upwards, then the current
@@ -13,12 +13,17 @@ Prints a markdown table with one row per (paragraph, key):
   UNVERIFIED  no note, a note without quotes, a failing note, or a quotation (4+ words) in the
               paragraph that no cited source holds verbatim, or an unbalanced quotation mark
   UNCITED     a quotation (4+ words) in a paragraph with no citation
+The note-level checks (no note, failing note, note without quotes, no citation) always fail the
+run. The draft-quote checks (UNCITED, and UNVERIFIED caused only by a draft quotation) are
+heuristic: they are printed as `UNVERIFIED (advisory)` / `UNCITED (advisory)` and fail the run
+only with --strict-quotes.
   UNSOURCED   informational: the block follows `<!-- unsourced: <reason> -->`, so its quotations
               are not matched against a source (own interview, translation, epigraph, hypothesis)
 A block is a paragraph plus what belongs to it: a blockquote next to it, the footnote its `[^n]`
 points to, and the list or paragraph after a line ending in ":". Quotations are "", “”, „“, ‚‘, ‘’,
 «», »«, ‹›, 「」, 『』, <q>, <blockquote> and `>` lines. Unquoted paraphrase is not judged.
-Exits 1 if any row is UNVERIFIED or UNCITED, or no citation is recognised; 2 on usage error.
+Exits 1 if any note-level row is UNVERIFIED, or no citation is recognised (with --strict-quotes
+also if any advisory row); 2 on usage error.
 No model calls, no network. Needs verify-quotes in the same directory.
 """
 from __future__ import annotations
@@ -253,10 +258,12 @@ def main(argv: list[str]) -> int:
     if any(a in ("-h", "--help") for a in argv[1:]):
         print(__doc__ + "Requires: python3 >= 3.9 (stdlib only).")
         return 0
-    if len(argv) != 2:
-        print("usage: check-claims <draft.md>", file=sys.stderr)
+    strict_quotes = "--strict-quotes" in argv[1:]
+    args = [a for a in argv[1:] if a != "--strict-quotes"]
+    if len(args) != 1:
+        print("usage: check-claims [--strict-quotes] <draft.md>", file=sys.stderr)
         return 2
-    draft = Path(argv[1])
+    draft = Path(args[0])
     try:
         text = html.unescape(draft.read_bytes().decode("utf-8-sig"))
         vq = load_vq()
@@ -283,7 +290,7 @@ def main(argv: list[str]) -> int:
             whole = None
             if src is not None:
                 try:
-                    _, body, _ = vq.load_source(src, k, "auto")
+                    _, body, _ = vq.load_source(src, k, "auto", vq.project_root(path))
                     whole = vq.variants(vq.PAGE_RE.sub("\n", body))
                 except (OSError, ValueError):
                     pass
@@ -299,11 +306,12 @@ def main(argv: list[str]) -> int:
         return res
 
     print("| line | key | status | paragraph | detail |\n|---|---|---|---|---|")
-    bad = nosrc_rows = n_cited = 0
+    bad = adv = nosrc_rows = n_cited = 0
+    rows_out = []
     cells = lambda x: x.replace("|", "/")
 
     def emit(n, key, st, para, detail):
-        print(f"| {n} | {key} | {st} | {cells(para)} | {cells(detail)} |")
+        rows_out.append(f"| {n} | {key} | {st} | {cells(para)} | {cells(detail)} |")
 
     for blk in blocks(text):
         n = blk[0].start
@@ -321,8 +329,8 @@ def main(argv: list[str]) -> int:
         reasons = [sg.marker for sg in blk if sg.marker]
         if not keys:
             if full:
-                bad += 1
-                emit(n, "-", "UNCITED", para, "quotation without a citation (cite its source, or mark the block "
+                adv += 1
+                emit(n, "-", "UNCITED (advisory)", para, "quotation without a citation (cite its source, or mark the block "
                      "<!-- unsourced: reason -->): " + "; ".join(f'"{q.strip()}"' for q in full))
         else:
             n_cited += 1
@@ -351,22 +359,29 @@ def main(argv: list[str]) -> int:
                 if why:
                     st, detail = "UNVERIFIED", why
                 elif problems:
-                    st, detail = "UNVERIFIED", "; ".join(problems)
+                    st, detail = "UNVERIFIED (advisory)", "; ".join(problems)
                 elif nosrc is not None:
                     st, detail = "NO-SOURCE", nosrc
                 else:
                     st, detail = "OK", "; ".join(dict.fromkeys(notes_on))
                 bad += st == "UNVERIFIED"
+                adv += st == "UNVERIFIED (advisory)"
                 nosrc_rows += st == "NO-SOURCE"
                 emit(n, k, st, para, detail)
         if reasons:
             emit(n, "-", "UNSOURCED", para, "quotations not matched against a source: " + "; ".join(reasons))
+    if strict_quotes:
+        rows_out = [r.replace(" (advisory) |", " |", 1) for r in rows_out]
+    print("\n".join(rows_out))
     extra = f"; {nosrc_rows} NO-SOURCE" if nosrc_rows else ""
-    print(f"\n{n_cited} cited paragraph(s); {bad} row(s) not OK{extra}.")
+    if adv and not strict_quotes:
+        print("\nadvisory: draft-quote check is heuristic; run with --strict-quotes to make it fail")
+    print(f"\n{n_cited} cited paragraph(s); {bad + (adv if strict_quotes else 0)} row(s) not OK{extra}; "
+          f"{0 if strict_quotes else adv} advisory.")
     if not n_cited:
         print("check-claims: no citations recognised in the draft (expected [@key] or @key)", file=sys.stderr)
         return 1
-    return 1 if bad else 0
+    return 1 if bad or (strict_quotes and adv) else 0
 
 
 if __name__ == "__main__":
