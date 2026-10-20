@@ -216,28 +216,50 @@ def md_meta(text: str) -> tuple[dict, str]:
     return meta, t[m.end():]
 
 
+def project_root(note: Path) -> Path:
+    """Nearest ancestor of the note holding 02_sources/; else the note's grandparent's parent."""
+    here = note.resolve().parent
+    for d in (here, *here.parents):
+        if (d / "02_sources").is_dir():
+            return d
+    return here.parent.parent
+
+
 def find_source(note: Path, ref: str) -> Path | None:
+    """The source md as the note names it, relative to the project root (may lie outside 02_sources/md)."""
     p = Path(ref)
-    if p.is_absolute():
-        return p if p.is_file() else None
-    for base in (note.resolve().parent.parent.parent, note.resolve().parent, Path.cwd()):
-        if (base / p).is_file():
-            return base / p
-    return None
+    p = p if p.is_absolute() else project_root(note) / p
+    return p if p.is_file() else None
 
 
-def manifest_hash(src: Path):
-    """(manifest has an md_sha256 column, that md's last recorded hash or None)."""
-    mf = src.resolve().parent.parent / "manifest.csv"
+def in_sources(note: Path, src: Path) -> bool:
+    return src.resolve().is_relative_to((project_root(note) / "02_sources" / "md").resolve())
+
+
+def manifest_rows(root: Path):
+    """(rows or None if absent, fieldnames, broken). broken = exists but unreadable or unparsable."""
+    mf = root / "02_sources" / "manifest.csv"
+    if not mf.exists():
+        return None, [], False
     try:
         with open(mf, newline="", encoding="utf-8-sig") as f:
             rd = csv.DictReader(f)
-            if "md_sha256" not in (rd.fieldnames or []):
-                return False, None
-            rows = [r for r in rd if r.get("stem") == src.stem]
+            names = rd.fieldnames or []
+            rows = list(rd)
     except (OSError, UnicodeDecodeError, csv.Error):
-        return False, None
-    return True, (rows[-1].get("md_sha256") or "").strip().lower() if rows else None
+        return None, [], True
+    return rows, names, not names
+
+
+def manifest_hash(src: Path):
+    """(manifest records md_sha256 or is broken, that md's last recorded hash or None, broken)."""
+    rows, names, broken = manifest_rows(src.resolve().parent.parent.parent)
+    if broken:
+        return True, None, True
+    if rows is None or "md_sha256" not in names:
+        return False, None, False
+    hits = [r for r in rows if r.get("stem") == src.stem]
+    return True, ((hits[-1].get("md_sha256") or "").strip().lower() if hits else None), False
 
 
 def load_source(src: Path, citekey: str, strict=False) -> tuple[dict[int, set], str, list[str]]:
@@ -246,14 +268,16 @@ def load_source(src: Path, citekey: str, strict=False) -> tuple[dict[int, set], 
     text = read_utf8(src)
     fm, body = md_meta(text)
     problems = []
-    has_col, mval = manifest_hash(src)
+    has_col, mval, broken = manifest_hash(src)
     if strict == "auto":
         strict = has_col
     want = fm.get("md_sha256", "").lower()
+    if strict and broken:
+        problems.append("02_sources/manifest.csv exists but cannot be read; fix it or re-run pdf2md --force")
     if want:
         if body_hash(text) != want:
             problems.append(f"source md edited after conversion (md_sha256 mismatch): {src.name}")
-        if strict and has_col and mval != want:
+        if strict and has_col and not broken and mval != want:
             problems.append(f"manifest.csv md_sha256 for {src.stem} "
                             f"{'is missing' if mval is None else 'differs from the md front matter'}; re-run pdf2md --force")
     elif strict:
@@ -287,6 +311,11 @@ def check_note_full(note: Path, strict=False):
             out.append((False, f"{name}: a note without a source cannot have quotes"))
         if ck != note.stem:
             out.append((False, f"{name}: citekey {ck!r} does not match the file name; rename the note to {ck}.md"))
+        root = project_root(note)
+        rows, _, _ = manifest_rows(root)
+        if (root / "02_sources/md" / f"{ck}.md").is_file() or (root / "02_sources/pdf" / f"{ck}.pdf").is_file() \
+                or any(r.get("stem") == ck for r in rows or []):
+            out.append((False, f"{name}: this source has a converted copy; use source_md: 02_sources/md/{ck}.md"))
         return out or [(True, f"NO-SOURCE: {why} ({name})")], 0, None, why
     if not (quotes or claims or ref):
         return [(False, f"{name}: empty note (no quotes, no claims, no source_md; misspelled keys?)")], 0, None, None
@@ -304,6 +333,8 @@ def check_note_full(note: Path, strict=False):
     if src is None:
         return out + [(False, f"{name}: quote {i}: source_md not found: {ref!r}")
                       for i, _ in enumerate(quotes, 1)], len(quotes), None, None
+    if not in_sources(note, src):
+        return out + [(False, f"{name}: source_md must be a file under 02_sources/md/ (got {ref!r})")], len(quotes), None, None
     try:
         pages, _, problems = load_source(src, ck, strict)
     except (OSError, ValueError) as e:
@@ -313,7 +344,7 @@ def check_note_full(note: Path, strict=False):
         text, page = str(q.get("text", "")), str(q.get("page", "")).strip()
         want = _ws(text)
         label = f"{name}: quote {i} (p. {page})"
-        cjk = " " not in want and CJK_RE.search(want)
+        cjk = bool(CJK_RE.search(want))
         if not want:
             out.append((False, f"{label}: empty quote"))
         elif cjk and len(want) < MIN_CJK:

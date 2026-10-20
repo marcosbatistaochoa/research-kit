@@ -212,6 +212,73 @@ class Bypass(unittest.TestCase):
         self.assertIn("manifest.csv", r.stdout)
         self.assertRejected(self.run_tool("check-claims", root, "draft.md"))
 
+    # round 2
+    def test_footnote_and_colon_attachment(self):
+        self.assertUnverified(f'Lei writes "{self.F}".[^1]\n\n[^1]: See @lei2023financial, p. 9.\n')
+        self.assertUnverified(f'As Lei puts it [@lei2023financial]:\n\n- "{self.F}."\n')
+        self.assertUnverified(f'As Lei puts it [@lei2023financial]:\n\n"{self.F}."\n')
+
+    def test_uncited_quote(self):
+        r = self.claims_text(f'Genuine [@lei2023financial, p. 3].\n\nSomeone said "{self.F}" once.\n')
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("UNCITED", r.stdout)
+
+    def test_quote_inside_citation_brackets(self):
+        for d in (f'[@lei2023financial, p. 9: "{self.F}"]', f'[as Lei puts it, \u201c{self.F}\u201d, @lei2023financial]',
+                  f'Text.^[Lei: "{self.F}" @lei2023financial]'):
+            self.assertUnverified(d + "\n")
+
+    def test_apostrophes_do_not_hide_text(self):
+        real = "Conversely, Zeev (2019) underscores that freely depreciating exchange rates"
+        self.assertUnverified(f"Lei [@lei2023financial] says \u2018{real} don\u2019t ever rescue labor markets\u2019.\n")
+        self.assertUnverified(f"Lei [@lei2023financial] says '{real} don't ever rescue labor markets'.\n")
+        self.assertUnverified(f"Lei [@lei2023financial] says \u2018{real} crisis\u2019s fake tail never written\u2019.\n")
+        self.assertUnverified(f"Lei [@lei2023financial] says \u2018{self.F} and more words here.\n")
+
+    def test_ellipsis_pieces_all_checked(self):
+        self.assertUnverified(f'Lei [@lei2023financial] says "Never \u2026 {self.REAL.split(" ", 1)[1]}".\n')
+        self.assertUnverified('Lei [@lei2023financial] says "always rescue labor" "markets in every" "crisis for sure".\n')
+
+    def test_cjk_with_latin_token(self):
+        self.assertUnverified("Lei [@lei2023financial] \u8bf4 \u201cLei \u8d27\u5e01\u653f\u7b56\u4e00\u5b9a\u4f1a\u62ef\u6551\u6240\u6709\u5e02\u573a\u201d.\n")
+
+    def test_more_quote_forms(self):
+        for q in (f"\u300c{self.F}\u300d", f"\u300e{self.F}\u300f", f"&ldquo;{self.F}&rdquo;",
+                  f"<blockquote>{self.F}</blockquote>", f"\u201a{self.F}\u2018", f"\u00bb{self.F}\u00ab", f"\u203a{self.F}\u2039"):
+            self.assertUnverified(f"Lei writes {q} [@lei2023financial, p. 3].\n")
+
+    def test_fence_and_url_do_not_hide_citation(self):
+        self.assertUnverified(f'```code``` Lei writes "{self.F}" [@lei2023financial].\n')
+        self.assertUnverified(f'Lei "{self.F}" (https://doi.org/10.1/x)[@lei2023financial]\n')
+
+    def test_nosource_not_self_declarable_for_converted_paper(self):
+        ns = '---\ncitekey: lei2023financial\nsource_md: none\nno_source: print\nclaims:\n  - "x"\nquotes: []\n---\n'
+        root = self.project_text(f'Lei writes "{self.F}" [@lei2023financial].\n', {"lei2023financial": ns})
+        r = self.run_tool("verify-quotes", root, "01_notes/lit/lei2023financial.md")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("converted copy", r.stdout)
+        self.assertNotEqual(self.run_tool("check-claims", root, "draft.md").returncode, 0)
+
+    def test_forged_source_outside_sources_and_broken_manifest(self):
+        root = self.project("lei2023financial")
+        (root / "03_x/md").mkdir(parents=True)
+        forged = SRC_MD.read_text(encoding="utf-8") + f"\n<!-- page 3 -->\n{self.F}.\n"
+        (root / "03_x/md/lei2023financial.md").write_text(forged, encoding="utf-8")
+        note = (FIX / "notes/lei2023financial.md").read_text(encoding="utf-8").replace(
+            "02_sources/md/lei2023financial.md", "03_x/md/lei2023financial.md")
+        (root / "01_notes/lit/lei2023financial.md").write_text(note, encoding="utf-8")
+        r = self.run_tool("verify-quotes", root, "01_notes/lit/lei2023financial.md")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("under 02_sources/md", r.stdout)
+        # a manifest that cannot be parsed makes check-claims strict
+        root = self.project("lei2023financial")
+        (root / "02_sources/manifest.csv").write_bytes(b"\xff\xfe\x00bad")
+        (root / "draft.md").write_text("Lei [@lei2023financial].\n", encoding="utf-8")
+        self.assertNotEqual(self.run_tool("check-claims", root, "draft.md").returncode, 0)
+
+    def test_short_quotes_add_up(self):
+        self.assertUnverified('Lei [@lei2023financial] says "always rescue" and "labor markets" and "every crisis".\n')
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -28,7 +28,8 @@ class CheckClaims(unittest.TestCase):
             (root / "02_sources/md").mkdir(parents=True)
             for k, body in notes.items():
                 (root / f"01_notes/lit/{k}.md").write_text(body.format(k=k), encoding="utf-8")
-                (root / f"02_sources/md/{k}.md").write_text(SOURCE.format(k=k), encoding="utf-8")
+                if "source_md: none" not in body:
+                    (root / f"02_sources/md/{k}.md").write_text(SOURCE.format(k=k), encoding="utf-8")
             (root / "10_draft.md").write_text(draft, encoding="utf-8")
             return subprocess.run([sys.executable, str(TOOL), str(root / "10_draft.md")],
                                   capture_output=True, text=True, encoding="utf-8", errors="replace")
@@ -144,6 +145,43 @@ class CheckClaims(unittest.TestCase):
         r = self.run_draft('He wrote \u201cMoney is invented by aliens in space [@a].\n', {"a": OK_NOTE})
         self.assertEqual(r.returncode, 1)
         self.assertIn("unbalanced", r.stdout)
+
+    def test_uncited_quote_is_flagged_unless_marked(self):
+        q = '"Money is a social convention that evolved"'
+        r = self.run_draft(f"Cited [@a].\n\nAn aside {q} appears here.\n", {"a": OK_NOTE})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("UNCITED", r.stdout)
+        r = self.run_draft(f"Cited [@a].\n\n<!-- unsourced: own interview -->\nAn aside {q} appears here.\n", {"a": OK_NOTE})
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("UNSOURCED", r.stdout)
+        self.assertIn("own interview", r.stdout)
+        # empty reason: ignored
+        r = self.run_draft(f"Cited [@a].\n\n<!-- unsourced: -->\nAn aside {q} appears here.\n", {"a": OK_NOTE})
+        self.assertEqual(r.returncode, 1)
+        # marker exempts quotes, never citations
+        r = self.run_draft('<!-- unsourced: hypothesis box -->\nHe said "never ever verified anywhere" [@ghost].\n', {"a": OK_NOTE})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("UNVERIFIED", self.row(r, "ghost"))
+
+    def test_locator_emphasis_and_apostrophes(self):
+        r = self.run_draft("Lei [@a] wrote:\n\n> Money is a *social* convention that evolved over many centuries (p. 9)\n", {"a": OK_NOTE})
+        self.assertEqual(r.returncode, 0, r.stdout)
+        r = self.run_draft("Lei [@a] wrote:\n\n> Money is a social convention that evolved over many centuries (Lei, 2023, p. 9)\n", {"a": OK_NOTE})
+        self.assertEqual(r.returncode, 0, r.stdout)
+        r = self.run_draft("The \u201890s and a 12\u201d ruler and the \u00bbfoo bar\u00ab [@a].\n", {"a": OK_NOTE})
+        self.assertEqual(r.returncode, 0, r.stdout)
+        r = self.run_draft("Money is \u2018a social convention that evolved over many centuries\u2019 [@a].\n", {"a": OK_NOTE})
+        self.assertEqual(r.returncode, 0, r.stdout)
+
+    def test_no_source_quote_message(self):
+        ns = '---\ncitekey: {k}\nsource_md: none\nno_source: print book\nclaims:\n  - "x"\nquotes: []\n---\n'
+        r = self.run_draft('He wrote "never ever verified anywhere at all" [@a].\n', {"a": ns})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("no source text for a (NO-SOURCE)", r.stdout)
+
+    def test_table_shows_original_text(self):
+        r = self.run_draft('Money `code` [@a] and <!-- note --> more.\n', {"a": OK_NOTE})
+        self.assertIn("`code`", r.stdout)
 
     def test_zero_citations_fails(self):
         r = self.run_draft("No citation here at all.\n", {"a": OK_NOTE})

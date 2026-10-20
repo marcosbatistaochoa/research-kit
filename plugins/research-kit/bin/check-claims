@@ -5,17 +5,21 @@ Usage: check-claims <draft.md>
 
 Finds paragraphs carrying a pandoc citation ([@key], [@a; @b], [@{key}], narrative @key) and maps
 each key to 01_notes/lit/<key>.md (looked up from the draft's directory upwards, then the current
-directory). Code, HTML comments, URLs and email addresses are ignored. Every cited note is run
-through verify-quotes' checks (strict about md_sha256 when 02_sources/manifest.csv records it).
+directory). Code, HTML comments, URLs and emails are ignored. Every cited note is run through
+verify-quotes' checks (strict about md_sha256 when 02_sources/manifest.csv records it).
 Prints a markdown table with one row per (paragraph, key):
   OK          the note exists, has quotes, and every quote verifies against its source
   NO-SOURCE   the note declares a source that cannot be quoted (software, data, print book)
-  UNVERIFIED  no note, a note without quotes, a failing note, or a quoted passage (4+ words, in
-              "", “”, ‘’, «», a blockquote, ...) in the paragraph that no cited source holds
-              verbatim; also an unbalanced quotation mark. The reason is shown.
-Every quote in a paragraph must occur in one of that paragraph's cited sources; the row shows which.
-Unquoted paraphrase is not judged. Exits 1 if any row is UNVERIFIED or no citation is recognised,
-2 on usage error. No model calls, no network. Needs verify-quotes in the same directory.
+  UNVERIFIED  no note, a note without quotes, a failing note, or a quotation (4+ words) in the
+              paragraph that no cited source holds verbatim, or an unbalanced quotation mark
+  UNCITED     a quotation (4+ words) in a paragraph with no citation
+  UNSOURCED   informational: the block follows `<!-- unsourced: <reason> -->`, so its quotations
+              are not matched against a source (own interview, translation, epigraph, hypothesis)
+A block is a paragraph plus what belongs to it: a blockquote next to it, the footnote its `[^n]`
+points to, and the list or paragraph after a line ending in ":". Quotations are "", “”, „“, ‚‘, ‘’,
+«», »«, ‹›, 「」, 『』, <q>, <blockquote> and `>` lines. Unquoted paraphrase is not judged.
+Exits 1 if any row is UNVERIFIED or UNCITED, or no citation is recognised; 2 on usage error.
+No model calls, no network. Needs verify-quotes in the same directory.
 """
 from __future__ import annotations
 
@@ -24,6 +28,7 @@ import sys
 if sys.version_info < (3, 9):
     sys.exit("check-claims needs Python 3.9 or newer")
 
+import html
 import importlib.machinery
 import importlib.util
 import re
@@ -32,17 +37,23 @@ from pathlib import Path
 KEY = r"\w(?:\w|[:.#$%&+?<>~-](?=\w))*"
 CITE_RE = re.compile(r"(?<![\w@/])-?@(?:\{([^{}\n]+)\}|(" + KEY + "))")
 CITE_BRACKET = re.compile(r"\[[^\[\]]*@[^\[\]]*\]")
-FENCE_RE = re.compile(r"^[ \t]*(```+|~~~+)[^\n]*\n.*?(?:^[ \t]*\1[^\n]*$|\Z)", re.S | re.M)
+FENCE_RE = re.compile(r"^[ \t]*(`{3,}(?![^\n]*`)|~{3,})[^\n]*\n.*?(?:^[ \t]*\1[^\n]*$|\Z)", re.S | re.M)
 CODE_RE = re.compile(r"(`+)((?:(?!\n[ \t]*\n).)+?)\1", re.S)
 COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
-URL_RE = re.compile(r"(?:[A-Za-z][\w+.-]*://|www\.)[^\s<>\]]*")
+URL_RE = re.compile(r"(?:[A-Za-z][\w+.-]*://|www\.)[^\s)\]\[>]*")
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+MARKER_RE = re.compile(r"^[ \t]*<!--\s*unsourced:\s*(\S.*?)\s*-->[ \t]*$")
+FOOTDEF_RE = re.compile(r"^\[\^([^\]]+)\]:")
 PAIRS = re.compile("|".join([
-    r"“([^“”]*)”", r"„([^„“”]*)[“”]", r"«([^«»]*)»", r"‹([^‹›]*)›", r"&quot;(.*?)&quot;", r"<q>(.*?)</q>",
-    r'"([^"]*)"', r"‘([^‘’]*)’",
-    r"(?<![^\s(\[])'([^']*)'(?![^\s.,;:!?)\]])",  # straight single: opens after space/(, closes before space/punct
+    r"“([^“”]*)”", r"„([^„“”]*)[“”]", r"«([^«»]*)»", r"»([^«»]*)«", r"‹([^‹›]*)›", r"›([^‹›]*)‹",
+    r"「([^「」]*)」", r"『([^『』]*)』", r"<q>(.*?)</q>", r'"([^"]*)"',
+    r"‚((?:[^‚‘’]|(?<=\w)’(?=\w))*)(?:(?<!\w)[‘’]|[‘’](?!\w))",
+    r"‘((?:[^‘’]|(?<=\w)’(?=\w))*)(?:(?<!\w)’|’(?!\w))",
+    r"(?<![^\s(\[])'(?P<s1>(?:[^']|(?<=\w)'(?=\w))*)(?:(?<!\w)'|'(?!\w))",
 ]), re.S)
-STRAY = re.compile(r"[“”\"„«»‹›‘]|&quot;|</?q>")
+STRAY = re.compile(r"[“”\"„«»「『]")
+STRAY_OPEN = re.compile(r"(?<![^\s(\[])['‘‚](?=[^\W\d_]\S*(?:\s+\S+){3})")
+LOCATOR = re.compile(r"\s*\([^()]*\bpp?\.\s*\d[^()]*\)\s*$")
 ELLIPSIS_OR_INSERT = re.compile(r"(\.\s?\.\s?\.|…|\[[^\[\]]*\])")
 MIN_QUOTE_WORDS, MIN_PIECE_WORDS, MIN_QUOTE_CJK = 4, 3, 8
 
@@ -66,15 +77,6 @@ def _blank(m: re.Match) -> str:
     return re.sub(r"[^\n]", " ", m.group(0))
 
 
-def mask(text: str) -> str:
-    """Blank out code, HTML comments, URLs and emails (newlines kept so line numbers hold)."""
-    text = COMMENT_RE.sub(_blank, text)
-    text = FENCE_RE.sub(_blank, text)
-    text = CODE_RE.sub(_blank, text)
-    text = URL_RE.sub(_blank, text)
-    return EMAIL_RE.sub(_blank, text)
-
-
 def keys_in(text: str) -> list[str]:
     out: list[str] = []
     for m in CITE_RE.finditer(text):
@@ -84,80 +86,146 @@ def keys_in(text: str) -> list[str]:
     return out
 
 
-def _is_bq(lines: list[str]) -> bool:
-    return all(l.lstrip().startswith(">") for l in lines)
+class Seg:
+    """One paragraph-like run of lines: masked (for parsing) and original (for display)."""
+    def __init__(self, start, m, o, marker=None):
+        self.start, self.m, self.o, self.marker = start, m, o, marker
+
+    @property
+    def text(self):
+        return " ".join(self.m)
+
+    @property
+    def is_bq(self):
+        return all(l.startswith(">") for l in self.m)
 
 
-def cited_paragraphs(text: str) -> list[tuple[int, list[str], list[str]]]:
-    """(line number, lines, keys) per paragraph that cites. A blockquote paragraph without its own
-    citation joins the cited paragraph before it, else the cited one after it."""
-    paras: list[tuple[int, list[str]]] = []
-    start, buf = 1, []
-    for i, line in enumerate(mask(text).splitlines(), 1):
+def blocks(text: str) -> list[list[Seg]]:
+    """Blocks of segments. Masks code, comments, URLs, emails; honours unsourced markers."""
+    orig = text.splitlines()
+    t = FENCE_RE.sub(_blank, text)
+    markers = {}
+    for i, line in enumerate(t.splitlines(), 1):
+        m = MARKER_RE.match(line)
+        if m:
+            markers[i + 1] = m.group(1)
+    for rx in (COMMENT_RE, CODE_RE, URL_RE, EMAIL_RE):
+        t = rx.sub(_blank, t)
+    segs, start, buf = [], 1, []
+    lines = t.splitlines()
+    for i, line in enumerate(lines + [""], 1):
         if line.strip():
             if not buf:
                 start = i
-            buf.append(line.strip())
+            buf.append(i - 1)
         elif buf:
-            paras.append((start, buf))
+            segs.append(Seg(start, [lines[j].strip() for j in buf],
+                            [orig[j] if j < len(orig) else "" for j in buf], markers.get(start)))
             buf = []
-    if buf:
-        paras.append((start, buf))
-    out: list[tuple[int, list[str]]] = []
-    pending: list[tuple[int, list[str]]] = []
-    for n, lines in paras:
-        cites = bool(keys_in(" ".join(lines)))
-        if _is_bq(lines) and not cites:
-            if out and keys_in(" ".join(out[-1][1])):
-                out[-1] = (out[-1][0], out[-1][1] + lines)
-            else:
-                pending.append((n, lines))
+    # footnote definitions belong to the paragraphs that reference them
+    defs, plain = {}, []
+    for sg in segs:
+        fm = FOOTDEF_RE.match(sg.m[0])
+        if fm:
+            defs[fm.group(1)] = sg
+        else:
+            plain.append(sg)
+    blks = [[sg] for sg in plain]
+    used = set()
+    for blk in blks:
+        for fid, d in defs.items():
+            if re.search(r"\[\^" + re.escape(fid) + r"\](?!:)", blk[0].text):
+                blk.append(d)
+                used.add(fid)
+    for fid, d in defs.items():
+        if fid not in used:
+            blks.append([d])
+    blks.sort(key=lambda b: b[0].start)
+
+    def cited(b):
+        return bool(keys_in(" ".join(s.text for s in b)))
+
+    out, pending = [], []
+    for b in blks:
+        if out and out[-1][-1].m[-1].rstrip().endswith(":"):  # "as Lei puts it:" + the list/paragraph after
+            out[-1] += b
             continue
-        if cites and pending:
-            n, lines = pending[0][0], [l for _, ls in pending for l in ls] + lines
-        pending = []
-        out.append((n, lines))
-    return [(n, ls, keys_in(" ".join(ls))) for n, ls in out if keys_in(" ".join(ls))]
+        if b[0].is_bq and not cited(b):
+            if out and cited(out[-1]):
+                out[-1] += b
+            else:
+                pending += b
+            continue
+        if pending:
+            if cited(b):
+                b = pending + b
+            else:
+                out.append(pending)
+            pending = []
+        out.append(b)
+    if pending:
+        out.append(pending)
+    return out
 
 
-def quotes_in(lines: list[str]) -> tuple[list[str], bool]:
-    """(quoted passages, unbalanced quotation mark present) for one paragraph."""
+def quotes_in(seg: Seg) -> tuple[list[str], bool]:
+    """(quoted passages, unbalanced quotation mark present) for one segment."""
     quotes, prose, bq = [], [], []
-    for l in lines + [""]:
+    for l in seg.m + [""]:
         if l.startswith(">"):
             bq.append(l.lstrip(">").strip())
             continue
         if bq:
-            quotes.append(" ".join(bq))
+            t = LOCATOR.sub("", CITE_BRACKET.sub(" ", " ".join(bq)))
+            quotes.append(t)
             bq = []
         if l:
             prose.append(l)
-    text = CITE_BRACKET.sub(" ", " ".join(prose))
-    text = re.sub(r"(?<=\d)[\"']", " ", text)  # inch / foot marks
-    quotes += [next(g for g in m.groups() if g is not None) for m in PAIRS.finditer(text)]
+    text = " ".join(prose)
+    for m in re.finditer(r"<blockquote[^>]*>(.*?)</blockquote>", text, re.S | re.I):
+        quotes.append(LOCATOR.sub("", CITE_BRACKET.sub(" ", re.sub(r"<[^>]+>", " ", m.group(1)))))
+    text = re.sub(r"<blockquote[^>]*>.*?</blockquote>", " ", text, flags=re.S | re.I)
+    text = CITE_RE.sub(" ", text)
+    text = re.sub(r"(?<=\d)[\"”]", " ", text)  # inch / foot marks
+    for m in PAIRS.finditer(text):
+        if m.group("s1") is not None and len(m.group("s1").split()) < MIN_QUOTE_WORDS:
+            continue  # apostrophes, not quotation marks
+        quotes.append(next(g for g in m.groups() if g is not None))
     left = PAIRS.sub(" ", text)
-    return [CITE_BRACKET.sub(" ", q) for q in quotes], bool(STRAY.search(left))
+    return quotes, bool(STRAY.search(left) or STRAY_OPEN.search(left))
 
 
-def quote_pieces(vq, q: str):
-    """Checkable (text, left_boundary, right_boundary) pieces of a draft quote, or None if it is a
-    term/scare quote that is not judged."""
-    q = q.strip().rstrip(",.;:!?").strip()
-    norm = vq._ws(q)
-    if " " not in norm and vq.CJK_RE.search(norm):
-        if len(norm) < MIN_QUOTE_CJK:
-            return None
-    elif len(norm.split()) < MIN_QUOTE_WORDS:
-        return None
-    parts = ELLIPSIS_OR_INSERT.split(q)  # text, sep, text, sep, ...
+def _plain(vq, q: str) -> str:
+    q = re.sub(r"\*+", "", q)
+    q = re.sub(r"(?<!\w)_+|_+(?!\w)", "", q)
+    return q.strip().rstrip(",.;:!?").strip()
+
+
+def is_term(vq, q: str) -> bool:
+    """A quote too short to be judged alone (scare quote, term)."""
+    norm = vq._ws(_plain(vq, q))
+    if vq.CJK_RE.search(norm):
+        return len(norm) < MIN_QUOTE_CJK
+    return len(norm.split()) < MIN_QUOTE_WORDS
+
+
+def quote_pieces(vq, q: str, whole: bool = False):
+    """(text, left_boundary, right_boundary, first) pieces to match in order. Every non-empty piece
+    counts; pieces under 3 words are matched as plain substrings. whole: a short quote kept whole."""
+    q = _plain(vq, q)
+    if whole:
+        t = vq._ws(q)
+        return [(t, True, True, True)] if re.search(r"\w", t) else []
+    parts = ELLIPSIS_OR_INSERT.split(q)
     pieces = []
     for i in range(0, len(parts), 2):
         t = vq._ws(parts[i])
+        if not re.search(r"\w", t):
+            continue
         after_insert = i > 0 and parts[i - 1].startswith("[")
         before_insert = i + 1 < len(parts) and parts[i + 1].startswith("[")
-        cjk = " " not in t and vq.CJK_RE.search(t)
-        if t and (len(t.split()) >= MIN_PIECE_WORDS or (cjk and len(t) >= MIN_QUOTE_CJK)):
-            pieces.append((t, not after_insert, not before_insert, i == 0))
+        small = len(t.split()) < MIN_PIECE_WORDS and not vq.CJK_RE.search(t)
+        pieces.append((t, not (after_insert or small), not (before_insert or small), i == 0))
     return pieces
 
 
@@ -190,7 +258,7 @@ def main(argv: list[str]) -> int:
         return 2
     draft = Path(argv[1])
     try:
-        text = draft.read_bytes().decode("utf-8-sig")
+        text = html.unescape(draft.read_bytes().decode("utf-8-sig"))
         vq = load_vq()
     except UnicodeDecodeError:
         print("check-claims: draft is not valid UTF-8", file=sys.stderr)
@@ -231,42 +299,71 @@ def main(argv: list[str]) -> int:
         return res
 
     print("| line | key | status | paragraph | detail |\n|---|---|---|---|---|")
-    bad = nosrc_rows = 0
-    rows = cited_paragraphs(text)
-    for n, lines, keys in rows:
-        states = {k: note_state(k) for k in keys}
-        quotes, unbalanced = quotes_in(lines)
-        problems, notes_on = [], []
-        if unbalanced:
-            problems.append("unbalanced quotation mark (close it, or the quote cannot be checked)")
-        for q in quotes:
-            pieces = quote_pieces(vq, q)
-            if pieces is None:
+    bad = nosrc_rows = n_cited = 0
+    cells = lambda x: x.replace("|", "/")
+
+    def emit(n, key, st, para, detail):
+        print(f"| {n} | {key} | {st} | {cells(para)} | {cells(detail)} |")
+
+    for blk in blocks(text):
+        n = blk[0].start
+        keys = keys_in(" ".join(sg.text for sg in blk))
+        para = " ".join(l.strip() for l in blk[0].o)
+        para = para if len(para) <= 100 else para[:97] + "..."
+        full, terms, unbalanced = [], [], False
+        for sg in blk:
+            if sg.marker:
                 continue
-            holders = [k for k in keys if states[k][1] is not None and held(vq, pieces, states[k][1])]
-            if holders:
-                notes_on.append("quote held by " + ", ".join(holders))
-            else:
-                problems.append(f'quote not verbatim in {", ".join(keys)} source '
-                                f'(check ellipsis/brackets/case): "{q.strip()}"')
-        para = " ".join(lines)
-        short = para if len(para) <= 100 else para[:97] + "..."
-        for k in keys:
-            why, _, nosrc = states[k]
-            if why:
-                st, detail = "UNVERIFIED", why
-            elif problems:
-                st, detail = "UNVERIFIED", "; ".join(problems)
-            elif nosrc is not None:
-                st, detail = "NO-SOURCE", nosrc
-            else:
-                st, detail = "OK", "; ".join(notes_on)
-            bad += st == "UNVERIFIED"
-            nosrc_rows += st == "NO-SOURCE"
-            print(f"| {n} | {k} | {st} | {short.replace('|', '/')} | {detail.replace('|', '/')} |")
+            qs, unb = quotes_in(sg)
+            unbalanced |= unb
+            for q in qs:
+                (terms if is_term(vq, q) else full).append(q)
+        reasons = [sg.marker for sg in blk if sg.marker]
+        if not keys:
+            if full:
+                bad += 1
+                emit(n, "-", "UNCITED", para, "quotation without a citation (cite its source, or mark the block "
+                     "<!-- unsourced: reason -->): " + "; ".join(f'"{q.strip()}"' for q in full))
+        else:
+            n_cited += 1
+            states = {k: note_state(k) for k in keys}
+            problems, notes_on = [], []
+            if unbalanced:
+                problems.append("unbalanced quotation mark (close it, or the quote cannot be checked)")
+            srcs = [k for k in keys if states[k][1] is not None]
+            nos = [k for k in keys if states[k][2] is not None]
+            checks = [(q, quote_pieces(vq, q)) for q in full]
+            if sum(len(vq._ws(_plain(vq, q)).split()) for q in terms if re.search(r"\w", q)) >= MIN_QUOTE_WORDS:
+                checks += [(q, quote_pieces(vq, q, whole=True)) for q in terms]
+            for q, pieces in checks:
+                holders = [k for k in srcs if held(vq, pieces, states[k][1])]
+                if holders:
+                    notes_on.append("quote held by " + ", ".join(holders))
+                    continue
+                if srcs or not nos:
+                    problems.append(f'quote not verbatim in {", ".join(srcs or keys)} source '
+                                    f'(check ellipsis/brackets/case): "{q.strip()}"')
+                if nos:
+                    problems.append(f'no source text for {", ".join(nos)} (NO-SOURCE); '
+                                    f'verify by hand or mark unsourced: "{q.strip()}"')
+            for k in keys:
+                why, _, nosrc = states[k]
+                if why:
+                    st, detail = "UNVERIFIED", why
+                elif problems:
+                    st, detail = "UNVERIFIED", "; ".join(problems)
+                elif nosrc is not None:
+                    st, detail = "NO-SOURCE", nosrc
+                else:
+                    st, detail = "OK", "; ".join(dict.fromkeys(notes_on))
+                bad += st == "UNVERIFIED"
+                nosrc_rows += st == "NO-SOURCE"
+                emit(n, k, st, para, detail)
+        if reasons:
+            emit(n, "-", "UNSOURCED", para, "quotations not matched against a source: " + "; ".join(reasons))
     extra = f"; {nosrc_rows} NO-SOURCE" if nosrc_rows else ""
-    print(f"\n{len(rows)} cited paragraph(s); {bad} row(s) not OK{extra}.")
-    if not rows:
+    print(f"\n{n_cited} cited paragraph(s); {bad} row(s) not OK{extra}.")
+    if not n_cited:
         print("check-claims: no citations recognised in the draft (expected [@key] or @key)", file=sys.stderr)
         return 1
     return 1 if bad else 0

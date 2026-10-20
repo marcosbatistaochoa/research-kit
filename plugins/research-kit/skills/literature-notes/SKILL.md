@@ -15,7 +15,7 @@ Source markdown carries page markers of the form `<!-- page N -->`; quote pages 
 3. Verify every note:
 
    ```
-   verify-quotes 01_notes/lit/*.md
+   verify-quotes --strict 01_notes/lit/*.md
    ```
 
    If not on PATH, run it from the kit's plugins/research-kit/bin/. It prints PASS/FAIL per quote and exits non-zero on any FAIL. A quote passes only if it has at
@@ -29,7 +29,8 @@ Source markdown carries page markers of the form `<!-- page N -->`; quote pages 
 
 For a source you cannot convert or quote (software, a dataset, a print book) write the note with
 `source_md: none` and `no_source: <reason>`, claims allowed, no quotes: `check-claims` then shows NO-SOURCE
-instead of failing. Quotes must be at least 5 words long.
+instead of failing. Quotes must be at least 5 words long. In the draft, a quotation that comes from no source (own interview,
+translation, epigraph) goes under a line `<!-- unsourced: <reason> -->`; `check-claims` lists it as UNSOURCED.
 
 Front matter fields: `citekey`, `source_md` (path relative to the project root), `read_scope`
 (`full_text` | `sections` | `abstract_only`), `claims[]`, `quotes[]` with `page` and `text`.
