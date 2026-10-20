@@ -1,8 +1,7 @@
 """Bypass corpus: each case is a known way to get a fabricated or unlinked quote past the tools.
 
-Every bypass test asserts the SECURE behaviour (non-zero exit / FAIL / UNVERIFIED) and is
-marked expectedFailure until the tools reject it; remove the marker when the fix lands.
-Controls (genuine quotes) must pass today and keep passing.
+Every bypass test asserts the SECURE behaviour (non-zero exit / FAIL / UNVERIFIED).
+Controls (genuine quotes) must keep passing.
 """
 import shutil
 import subprocess
@@ -59,43 +58,34 @@ class Bypass(unittest.TestCase):
         self.assertIn("OK", r.stdout)
 
     # bypasses
-    @unittest.expectedFailure
     def test_wrapped_quote_double_quoted_invented_continuation(self):
         self.assertRejected(self.verify("wrapped_dq"))
 
-    @unittest.expectedFailure
     def test_wrapped_quote_plain_invented_continuation(self):
         self.assertRejected(self.verify("wrapped_plain"))
 
-    @unittest.expectedFailure
     def test_flow_style_quotes_list(self):
         self.assertRejected(self.verify("flow"))
 
-    @unittest.expectedFailure
     def test_claims_without_quotes(self):
         self.assertRejected(self.verify("claims_only"))
 
-    @unittest.expectedFailure
     def test_fragment_quote(self):
         self.assertRejected(self.verify("fragment"))
 
-    @unittest.expectedFailure
     def test_note_bound_to_wrong_paper(self):
         # smith2020's quote is genuine Lei text; the note names Lei's source_md.
         self.assertRejected(self.verify("smith2020"))
 
-    @unittest.expectedFailure
     def test_check_claims_ok_despite_failing_quotes(self):
         root = self.project("fab2023", "fab2023")
         self.assertEqual(self.run_tool("verify-quotes", root, "01_notes/lit/fab2023.md").returncode, 1)
         self.assertRejected(self.run_tool("check-claims", root, "draft.md"))
 
-    @unittest.expectedFailure
     def test_fabricated_quote_in_draft(self):
         r = self.claims("fabricated_quote", "lei2023financial")
         self.assertTrue(r.returncode != 0 or "UNVERIFIED" in r.stdout, r.stdout)
 
-    @unittest.expectedFailure
     def test_draft_with_zero_recognised_citations(self):
         self.assertRejected(self.claims("zero_citations", "lei2023financial"))
 

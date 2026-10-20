@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Check that every cited sentence in a draft has a literature note with claims or quotes.
+"""Check that every cited sentence in a draft is backed by a note whose quotes verify.
 
 Usage: check-claims <draft.md>
 
-Finds sentences carrying a pandoc citation ([@key], [@a; @b], [@key, 12]) and maps each key
-to 01_notes/lit/<key>.md (looked up from the draft's directory upwards, then the current
-directory). Prints a markdown table with one row per (sentence, key):
-  UNSUPPORTED  no note for the key
-  THIN         note exists but lists no claim and no quote
-  OK           note lists at least one claim or quote
-Exits 1 if any row is not OK, 2 on usage error. No model calls, no network.
+Finds sentences carrying a pandoc citation ([@key], [@a; @b], [@key, 12], or narrative
+@key) and maps each key to 01_notes/lit/<key>.md (looked up from the draft's directory upwards,
+then the current directory). Every cited note is run through verify-quotes' checks. Prints a
+markdown table with one row per (sentence, key):
+  OK          the note exists, has quotes, and every quote verifies against its source
+  UNVERIFIED  no note, a note without quotes, a failing note, or a "double-quoted" passage in
+              the sentence that does not occur in the cited source (the reason is shown)
+Unquoted paraphrase is not judged. Exits 1 if any row is not OK or no citation is recognised,
+2 on usage error. No model calls, no network. Needs verify-quotes in the same directory.
 """
 from __future__ import annotations
 
@@ -18,11 +20,22 @@ import sys
 if sys.version_info < (3, 9):
     sys.exit("check-claims needs Python 3.9 or newer")
 
+import importlib.machinery
+import importlib.util
 import re
 from pathlib import Path
 
-CITE_RE = re.compile(r"\[[^\[\]]*@[^\[\]]*\]")
 KEY_RE = re.compile(r"(?<![\w@])-?@([A-Za-z0-9_][\w:.#$%&+?<>~/-]*)")
+QUOTE_RE = re.compile(r'"([^"]+)"|“([^”]+)”|„([^“”]+)[“”]')
+MASK = {".": "\x00", "!": "\x01", "?": "\x02"}
+
+
+def load_vq():
+    path = Path(__file__).resolve().parent / "verify-quotes"
+    loader = importlib.machinery.SourceFileLoader("verify_quotes", str(path))
+    mod = importlib.util.module_from_spec(importlib.util.spec_from_loader("verify_quotes", loader))
+    loader.exec_module(mod)
+    return mod
 
 
 def note_dir(draft: Path) -> Path | None:
@@ -32,43 +45,32 @@ def note_dir(draft: Path) -> Path | None:
     return None
 
 
-def note_status(path: Path) -> str:
-    """OK if the front matter has a non-empty claims or quotes list, else THIN."""
-    if not path.is_file():
-        return "UNSUPPORTED"
-    text = path.read_text(encoding="utf-8", errors="replace")
-    m = re.match(r"---\s*\n(.*?)\n---\s*(\n|$)", text, re.S)
-    if not m:
-        return "THIN"
-    section = None
-    for line in m.group(1).splitlines():
-        if line.strip() and not line.startswith((" ", "\t", "-")):
-            key, _, val = line.partition(":")
-            section = key.strip() if key.strip() in ("claims", "quotes") else None
-            inline = val.split("#")[0].strip()
-            if section and inline not in ("", "[]"):
-                return "OK"
-        elif section and line.strip().startswith("- ") and line.strip()[2:].strip():
-            return "OK"
-    return "THIN"
+def _mask(m: re.Match) -> str:
+    return "".join(MASK.get(c, c) for c in m.group(0))
 
 
 def cited_sentences(text: str) -> list[tuple[int, str, list[str]]]:
     """(line number, sentence, keys) for each sentence with a citation."""
     out = []
     for n, para in _paragraphs(text):
-        masked = CITE_RE.sub(lambda m: m.group(0).replace(".", "\x00"), para)
+        masked = re.sub(r"\[[^\[\]]*@[^\[\]]*\]", _mask, para)  # periods inside [@key, p. 3]
+        masked = QUOTE_RE.sub(_mask, masked)  # and inside quoted passages
         for s in re.split(r"(?<=[.!?])\s+", masked):
-            s = s.replace("\x00", ".").strip()
+            for ch, mk in MASK.items():
+                s = s.replace(mk, ch)
+            s = s.strip()
             keys: list[str] = []
-            for c in CITE_RE.findall(s):
-                for k in KEY_RE.findall(c):
-                    k = k.rstrip(".:;,")
-                    if k and k not in keys:
-                        keys.append(k)
+            for k in KEY_RE.findall(s):
+                k = k.rstrip(".:;,")
+                if k and k not in keys:
+                    keys.append(k)
             if keys:
                 out.append((n, s, keys))
     return out
+
+
+def draft_quotes(sentence: str) -> list[str]:
+    return [next(g for g in m.groups() if g) for m in QUOTE_RE.finditer(sentence)]
 
 
 def _paragraphs(text: str):
@@ -99,21 +101,64 @@ def main(argv: list[str]) -> int:
         return 2
     draft = Path(argv[1])
     try:
-        text = draft.read_text(encoding="utf-8")
-    except OSError as e:
-        print(f"check-claims: cannot read draft: {e}", file=sys.stderr)
+        text = draft.read_bytes().decode("utf-8-sig")
+        vq = load_vq()
+    except UnicodeDecodeError:
+        print("check-claims: draft is not valid UTF-8", file=sys.stderr)
+        return 2
+    except (OSError, ImportError, FileNotFoundError) as e:
+        print(f"check-claims: cannot read draft or verify-quotes: {e}", file=sys.stderr)
         return 2
     notes = note_dir(draft)
-    print("| line | key | status | sentence |\n|---|---|---|---|")
+    cache: dict = {}
+
+    def note_state(k: str):
+        """(reason or '', source-variants of the whole source or None)."""
+        if k in cache:
+            return cache[k]
+        res = ("no note " + k + ".md", None)
+        path = notes / f"{k}.md" if notes else None
+        if path is not None and path.is_file():
+            results, nq, src = vq.check_note_full(path)
+            bad = [m for ok, m in results if not ok]
+            whole = None
+            if src is not None:
+                try:
+                    _, body, _ = vq.load_source(src, k)
+                    whole = vq.variants(vq.PAGE_RE.sub("\n", body))
+                except (OSError, ValueError):
+                    pass
+            if bad:
+                res = (bad[0].split(": ", 1)[-1] + (f" (+{len(bad) - 1} more)" if len(bad) > 1 else ""), whole)
+            elif not nq:
+                res = ("note has no quotes", whole)
+            else:
+                res = ("", whole)
+        cache[k] = res
+        return res
+
+    print("| line | key | status | sentence | detail |\n|---|---|---|---|---|")
     bad = 0
     rows = cited_sentences(text)
     for n, sent, keys in rows:
+        states = {k: note_state(k) for k in keys}
+        lost = []
+        for q in draft_quotes(sent):
+            want = vq._ws(q)
+            if not any(w is not None and vq.contains(want, w) for _, w in states.values()):
+                lost.append(q)
         for k in keys:
-            st = note_status(notes / f"{k}.md") if notes else "UNSUPPORTED"
-            bad += st != "OK"
+            why = states[k][0]
+            if not why and lost:
+                why = "quote not found in source: " + "; ".join(f'"{q}"' for q in lost)
+            st = "UNVERIFIED" if why else "OK"
+            bad += bool(why)
             short = sent if len(sent) <= 100 else sent[:97] + "..."
-            print(f"| {n} | {k} | {st} | {short.replace('|', '/')} |")
+            print(f"| {n} | {k} | {st} | {short.replace('|', '/')} | {why.replace('|', '/')} |")
     print(f"\n{len(rows)} cited sentence(s); {bad} row(s) not OK.")
+    if not rows:
+        print("check-claims: no citations recognised in the draft (expected [@key] or @key)", file=sys.stderr)
+        return 1
     return 1 if bad else 0
 
 

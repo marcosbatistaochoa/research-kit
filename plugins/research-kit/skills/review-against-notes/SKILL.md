@@ -23,8 +23,11 @@ Order matters: mechanical checks first, model judgment second, adversary last. R
    ```
 
    If not on PATH, run it from the kit's plugins/research-kit/bin/. It prints a markdown table:
-   UNSUPPORTED (no note), THIN (note without claims or quotes), OK. Resolve UNSUPPORTED/THIN rows
-   (write the note, or drop the citation) before the model passes.
+   OK, or UNVERIFIED with the reason (no note, a note without quotes, a quote that fails
+   `verify-quotes`, or a "double-quoted" passage in the sentence that is not in the cited source).
+   It also exits non-zero if the draft has no recognisable citation (`[@key]` or narrative `@key`).
+   Resolve UNVERIFIED rows (write or fix the note, fix the quote, or drop the citation) before the
+   model passes.
 3. Delegate to the `claim-checker` agent with the cited sentences and keys. It judges each sentence against its note only
    (SUPPORTED / PARTIAL / NOT SUPPORTED / NOT ASSESSED, plus the quote relied on).
 4. Delegate to the `skeptic` agent, which tries to refute the 3 strongest claims, each finding with an evidence anchor.

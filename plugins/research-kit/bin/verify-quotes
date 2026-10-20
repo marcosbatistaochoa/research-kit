@@ -3,10 +3,13 @@
 
 Usage: verify-quotes <note.md...>
 
-A note has YAML-style front matter with `source_md: <path>` and a `quotes:` list of
-items with `page` and `text`. The source md carries page markers `<!-- page N -->`.
-A quote passes when it occurs on its pinned page after normalising whitespace,
-line-break hyphenation and typographic quotes/dashes. Prints PASS/FAIL per quote;
+A note has YAML-style front matter with `citekey` (= the file name), `source_md: <path>`
+(file name = the citekey) and a `quotes:` list of items with `page` and `text` (one-line
+strings; a front-matter line the parser cannot consume is an error). The source md carries
+page markers `<!-- page N -->` and, when made by pdf2md, an `md_sha256` of its body that is
+re-checked. A quote passes when it has at least 5 words and occurs on its pinned page, on word
+boundaries, after normalising Unicode (NFKC), whitespace, line-break hyphenation and typographic
+quotes/dashes. A note with claims needs quotes. Prints PASS/FAIL per quote;
 exits 1 on any FAIL, 2 on usage error.
 """
 from __future__ import annotations
@@ -16,23 +19,58 @@ import sys
 if sys.version_info < (3, 9):
     sys.exit("verify-quotes needs Python 3.9 or newer")
 
+import hashlib
 import json
 import re
+import unicodedata
 from pathlib import Path
 
 PAGE_RE = re.compile(r"<!--\s*page\s+(\d+)\s*-->")
+FM_RE = re.compile(r"\A---[ \t]*\n(.*?)\n---[ \t]*(?:\n|\Z)", re.S)
+KEY_LINE = re.compile(r"([A-Za-z_][\w-]*)[ \t]*:(?:[ \t]+(.*)|[ \t]*)\Z")
 TRANS = str.maketrans({"‘": "'", "’": "'", "“": '"', "”": '"',
-                       "–": "-", "—": "-", " ": " ", "­": ""})
+                       "–": "-", "—": "-", " ": " ", "­": ""})
+MIN_WORDS = 5
+_warned: set = set()
 
 
 def _ws(s: str) -> str:
-    return re.sub(r"\s+", " ", s.translate(TRANS)).strip()
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", s).translate(TRANS)).strip()
 
 
 def variants(s: str) -> set[str]:
     """Normalised forms: line-break hyphen dropped, or kept as a real hyphen."""
-    s = s.translate(TRANS)
+    s = unicodedata.normalize("NFKC", s).translate(TRANS)
     return {_ws(re.sub(r"(?<=\w)-[ \t]*\n\s*(?=\w)", repl, s)) for repl in ("", "-")}
+
+
+def contains(want: str, vs) -> bool:
+    """want (already _ws-normalised) occurs in one of the variants, on word boundaries."""
+    if not want:
+        return False
+    pat = ("(?<!\\w)" if want[0].isalnum() or want[0] == "_" else "") + re.escape(want) + \
+          ("(?!\\w)" if want[-1].isalnum() or want[-1] == "_" else "")
+    rx = re.compile(pat)
+    return any(rx.search(v) for v in vs)
+
+
+def canonical(text: str) -> str:
+    """UTF-8 text with LF newlines and NFC; the form md_sha256 is computed over."""
+    return unicodedata.normalize("NFC", text.replace("\r\n", "\n").replace("\r", "\n"))
+
+
+def body_hash(text: str) -> str:
+    """sha256 of the canonical body: everything after the closing front-matter line."""
+    t = canonical(text.lstrip("\ufeff"))
+    m = FM_RE.match(t)
+    return hashlib.sha256((t[m.end():] if m else t).encode("utf-8")).hexdigest()
+
+
+def read_utf8(path: Path) -> str:
+    try:
+        return path.read_bytes().decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise ValueError("not valid UTF-8")
 
 
 def split_pages(text: str) -> dict[int, str]:
@@ -40,44 +78,117 @@ def split_pages(text: str) -> dict[int, str]:
     return {int(parts[i]): parts[i + 1] for i in range(1, len(parts) - 1, 2)}
 
 
-def _scalar(v: str):
+def _scalar(v: str, flow_ok: bool = True) -> str:
+    """One YAML scalar: double-quoted (JSON escapes), single-quoted, or plain. Anything else raises."""
     v = v.strip()
-    if v.startswith('"') or v.startswith("'"):
+    if v[:1] == '"':
         try:
-            return json.loads(v) if v[0] == '"' else v[1:-1].replace("''", "'")
+            val, end = json.JSONDecoder().raw_decode(v)
         except ValueError:
-            return v.strip("\"'")
+            raise ValueError(f"unterminated or invalid double-quoted string: {v[:40]!r}")
+        if not isinstance(val, str) or not re.fullmatch(r"\s*(#.*)?", v[end:]):
+            raise ValueError(f"unexpected text after quoted string: {v[:40]!r}")
+        return val
+    if v[:1] == "'":
+        m = re.fullmatch(r"'((?:[^']|'')*)'\s*(#.*)?", v)
+        if not m:
+            raise ValueError(f"unterminated or invalid single-quoted string: {v[:40]!r}")
+        return m.group(1).replace("''", "'")
+    v = re.sub(r"\s+#.*\Z", "", v)
+    if v[:1] in ("|", ">"):
+        raise ValueError("block scalars are not supported; use a one-line quoted string")
+    if not flow_ok and v[:1] in ("[", "{"):
+        raise ValueError("flow-style lists/maps are not supported; use block lists")
     return v
 
 
-def parse_note(text: str) -> tuple[dict, list[dict]]:
-    m = re.match(r"---\s*\n(.*?)\n---\s*(\n|$)", text, re.S)
+def parse_note(text: str) -> tuple[dict, list[dict], list[str]]:
+    """Return (meta, quotes, claims). Raises ValueError on any front-matter line it cannot consume."""
+    m = FM_RE.match(canonical(text.lstrip("\ufeff")))
     if not m:
         raise ValueError("no front matter")
     meta: dict = {}
     quotes: list[dict] = []
-    in_quotes = False
+    claims: list[str] = []
+    seen: set = set()
+    section = None  # key whose indented block we are in (None = none allowed)
     cur = None
-    for line in m.group(1).splitlines():
+    dash = key_at = None
+    for n, line in enumerate(m.group(1).split("\n"), 2):
         if not line.strip() or line.lstrip().startswith("#"):
             continue
-        if not line.startswith((" ", "\t", "-")):
-            key, _, val = line.partition(":")
-            in_quotes = key.strip() == "quotes"
-            if not in_quotes:
-                meta[key.strip()] = _scalar(val)
-            continue
-        if not in_quotes:
-            continue
-        body = line.strip()
-        if body.startswith("- "):
-            cur = {}
-            quotes.append(cur)
-            body = body[2:]
-        if cur is not None and ":" in body:
-            k, _, v = body.partition(":")
-            cur[k.strip()] = _scalar(v)
-    return meta, quotes
+        where = f"front matter line {n}"
+        try:
+            if re.match(r" *\t", line):
+                raise ValueError("tab indentation")
+            indent = len(line) - len(line.lstrip(" "))
+            if indent == 0 and not line.startswith("- "):
+                km = KEY_LINE.match(line.rstrip())
+                if not km:
+                    raise ValueError(f"cannot parse {line.strip()[:60]!r} (wrapped text? use one line)")
+                key, val = km.group(1), (km.group(2) or "").strip()
+                if key in meta or (key in ("claims", "quotes") and key in seen):
+                    raise ValueError(f"duplicate key {key!r}")
+                section, cur, dash = None, None, None
+                if key in ("claims", "quotes"):
+                    seen.add(key)
+                    if re.sub(r"\s+#.*\Z", "", val) == "[]":
+                        continue
+                    if val and not val.startswith("#"):
+                        raise ValueError(f"{key}: must be a block list (flow-style lists are not supported)")
+                    section = key
+                else:
+                    meta[key] = _scalar(val) if val else ""
+                    if not val:
+                        section = key
+                continue
+            if section is None:
+                raise ValueError(f"unexpected indented line {line.strip()[:60]!r}")
+            body = line.strip()
+            if body.startswith("- "):
+                if dash is None:
+                    dash = indent
+                elif indent != dash:
+                    raise ValueError("inconsistent list indentation")
+                rest = body[2:].lstrip()
+                if section == "quotes":
+                    cur = {}
+                    quotes.append(cur)
+                    key_at = indent + len(body) - len(rest)
+                    body = rest
+                elif section == "claims":
+                    claims.append(_scalar(rest, flow_ok=False))
+                    continue
+                else:
+                    if not isinstance(meta[section], list):
+                        meta[section] = []
+                    meta[section].append(_scalar(rest))
+                    continue
+            elif section != "quotes" or cur is None or indent != key_at:
+                raise ValueError(f"cannot parse {body[:60]!r} (wrapped text? use one line)")
+            km = KEY_LINE.match(body)
+            if not km:
+                raise ValueError(f"cannot parse {body[:60]!r}")
+            if km.group(1) in cur:
+                raise ValueError(f"duplicate key {km.group(1)!r} in a quote")
+            cur[km.group(1)] = _scalar(km.group(2) or "", flow_ok=False)
+        except ValueError as e:
+            raise ValueError(f"{where}: {e}")
+    return meta, quotes, claims
+
+
+def md_meta(text: str) -> tuple[dict, str]:
+    """(simple key: value front matter, canonical body) of a source md."""
+    t = canonical(text.lstrip("\ufeff"))
+    m = FM_RE.match(t)
+    if not m:
+        return {}, t
+    meta = {}
+    for line in m.group(1).split("\n"):
+        km = KEY_LINE.match(line.rstrip())
+        if km:
+            meta[km.group(1)] = (km.group(2) or "").strip()
+    return meta, t[m.end():]
 
 
 def find_source(note: Path, ref: str) -> Path | None:
@@ -90,35 +201,72 @@ def find_source(note: Path, ref: str) -> Path | None:
     return None
 
 
-def check_note(note: Path) -> list[tuple[bool, str]]:
+def load_source(src: Path, citekey: str) -> tuple[dict[int, set], str, list[str]]:
+    """(page -> variants, whole-body text, problems). Raises ValueError if unreadable."""
+    text = read_utf8(src)
+    fm, body = md_meta(text)
+    problems = []
+    want = fm.get("md_sha256", "")
+    if want:
+        if body_hash(text) != want.lower():
+            problems.append(f"source md edited after conversion (md_sha256 mismatch): {src.name}")
+    elif src not in _warned:
+        _warned.add(src)
+        print(f"WARN {src.name}: no md_sha256 (legacy conversion); edits cannot be detected", file=sys.stderr)
+    pdf = fm.get("source", "")
+    if pdf and Path(pdf).stem != citekey:
+        problems.append(f"source md names pdf {pdf!r}, not citekey {citekey!r}")
+    return {n: variants(t) for n, t in split_pages(body).items()}, body, problems
+
+
+def check_note_full(note: Path) -> tuple[list[tuple[bool, str]], int, Path | None]:
+    """(results, number of quotes, resolved source md or None)."""
     name = note.name
     try:
-        meta, quotes = parse_note(note.read_text(encoding="utf-8"))
+        meta, quotes, claims = parse_note(read_utf8(note))
     except (OSError, ValueError) as e:
-        return [(False, f"{name}: cannot read note ({e})")]
+        return [(False, f"{name}: cannot read note ({e})")], 0, None
+    out: list[tuple[bool, str]] = []
+    ck, ref = str(meta.get("citekey", "")), str(meta.get("source_md", ""))
+    if claims and not quotes:
+        out.append((False, f"{name}: claims without quotes (every claim needs a verified quote)"))
+    if (quotes or ref or claims) and ck != note.stem:
+        out.append((False, f"{name}: citekey {ck!r} does not match the file name {note.stem!r}"))
+    if quotes or ref:
+        if Path(ref).stem != ck:
+            out.append((False, f"{name}: source_md {ref!r} is not the paper {ck!r} (stem must equal the citekey)"))
     if not quotes:
-        return [(True, f"{name}: no quotes")]
-    src = find_source(note, str(meta.get("source_md", "")))
+        return out or [(True, f"{name}: no quotes")], 0, None
+    src = find_source(note, ref)
     if src is None:
-        return [(False, f"{name}: quote {i}: source_md not found: {meta.get('source_md')!r}")
-                for i, _ in enumerate(quotes, 1)]
-    pages = {n: variants(t) for n, t in split_pages(src.read_text(encoding="utf-8")).items()}
-    out = []
+        return out + [(False, f"{name}: quote {i}: source_md not found: {ref!r}")
+                      for i, _ in enumerate(quotes, 1)], len(quotes), None
+    try:
+        pages, _, problems = load_source(src, ck)
+    except (OSError, ValueError) as e:
+        return out + [(False, f"{name}: cannot read source md {src.name} ({e})")], len(quotes), src
+    out += [(False, f"{name}: {p}") for p in problems]
     for i, q in enumerate(quotes, 1):
         text, page = str(q.get("text", "")), str(q.get("page", "")).strip()
         want = _ws(text)
         label = f"{name}: quote {i} (p. {page})"
         if not want:
             out.append((False, f"{label}: empty quote"))
+        elif len(want.split()) < MIN_WORDS:
+            out.append((False, f"{label}: quote shorter than {MIN_WORDS} words"))
         elif not page.isdigit() or int(page) not in pages:
             out.append((False, f"{label}: page {page!r} not found in source"))
-        elif any(want in v for v in pages[int(page)]):
+        elif contains(want, pages[int(page)]):
             out.append((True, label))
-        elif any(want in v for n, vs in pages.items() for v in vs):
+        elif any(contains(want, vs) for vs in pages.values()):
             out.append((False, f"{label}: text found on a different page"))
         else:
             out.append((False, f"{label}: text not found in source"))
-    return out
+    return out, len(quotes), src
+
+
+def check_note(note: Path) -> list[tuple[bool, str]]:
+    return check_note_full(note)[0]
 
 
 def main(argv: list[str]) -> int:

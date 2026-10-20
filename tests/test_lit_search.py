@@ -231,6 +231,26 @@ class BibExport(unittest.TestCase):
             self.assertEqual((len(added), len(skipped)), (0, 1))
             self.assertEqual(bib.read_text(encoding="utf-8").count("@article"), 1)
 
+    def test_key_collision_gets_suffix_and_doi_match_is_exact(self):
+        def fetch(url, accept="application/json"):
+            # every DOI resolves to an entry with the same citation key
+            doi = url.rsplit("doi.org/", 1)[1]
+            return "@article{same2020,\n\tdoi = {%s},\n\ttitle = {T},\n}" % doi
+        with tempfile.TemporaryDirectory() as t:
+            bib = Path(t) / "refs.bib"
+            bib.write_text("@article{same2020,\n\tdoi = {10.1000/alpha2},\n}\n", encoding="utf-8")
+            # 10.1000/alpha is a substring of the existing 10.1000/alpha2: must NOT count as present
+            added, skipped, failed = ls.export_bib(["10.1000/alpha", "10.1000/beta", "10.1000/alpha2"], bib, fetch)
+            self.assertEqual((len(added), len(skipped), len(failed)), (2, 1, 0))
+            text = bib.read_text(encoding="utf-8")
+            for key in ("same2020,", "same2020a,", "same2020b,"):
+                self.assertEqual(text.count("{" + key), 1, key)
+
+    def test_suffix_sequence(self):
+        taken = {"k"} | {"k" + chr(97 + i) for i in range(26)}
+        self.assertEqual(ls._suffixed("k", {"k"}), "ka")
+        self.assertEqual(ls._suffixed("k", taken), "kaa")
+
 
 if __name__ == "__main__":
     unittest.main()

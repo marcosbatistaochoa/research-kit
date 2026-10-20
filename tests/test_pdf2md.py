@@ -86,6 +86,44 @@ class RealPdf(unittest.TestCase):
         self.assertEqual(rows[0]["pages"], "2")
         self.assertEqual(rows[0]["method"], "pdftotext")
 
+    def test_md_sha256_and_converter_recorded(self):
+        import re
+        self.assertEqual(self.run_tool(), 0)
+        md = (self.out / "paper.md").read_text(encoding="utf-8")
+        h = re.search(r"^md_sha256: ([0-9a-f]{64})$", md, re.M).group(1)
+        self.assertEqual(h, pdf2md.canonical_hash(md.split("\n---\n", 1)[1]))
+        self.assertRegex(md, r"(?m)^converter: pdf2md \d")
+        rows = list(csv.DictReader(open(self.dir / "02_sources" / "manifest.csv", encoding="utf-8")))
+        self.assertEqual(rows[0]["md_sha256"], h)
+        self.assertTrue(rows[0]["converter"].startswith("pdf2md"))
+        self.assertNotIn(b"\r", (self.out / "paper.md").read_bytes())
+
+    def test_crlf_and_lf_bodies_hash_identically(self):
+        body = "<!-- page 1 -->\nAlpha \u00e9\n"
+        self.assertEqual(pdf2md.canonical_hash(body), pdf2md.canonical_hash(body.replace("\n", "\r\n")))
+        self.assertEqual(pdf2md.canonical_hash("e\u0301"), pdf2md.canonical_hash("\u00e9"))
+
+    def test_docling_refused(self):
+        import contextlib
+        import io
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = self.run_tool("--engine", "docling")
+        self.assertNotEqual(rc, 0)
+        self.assertIn("per-page", err.getvalue())
+        self.assertFalse((self.out / "paper.md").exists())
+
+    def test_legacy_manifest_upgraded(self):
+        self.out.parent.mkdir(parents=True, exist_ok=True)
+        (self.out.parent / "manifest.csv").write_text(
+            "stem,source,sha256,pages,chars_per_page,method,md_path\nold,o.pdf,abc,1,9.0,pdftotext,o.md\n",
+            encoding="utf-8")
+        self.assertEqual(self.run_tool(), 0)
+        rows = list(csv.DictReader(open(self.out.parent / "manifest.csv", encoding="utf-8")))
+        self.assertEqual([r["stem"] for r in rows], ["old", "paper"])
+        self.assertEqual(rows[0]["md_sha256"], "")
+        self.assertTrue(rows[1]["md_sha256"])
+
     def test_layout_flag_recorded(self):
         self.assertEqual(self.run_tool("--layout"), 0)
         self.assertIn("method: pdftotext-layout", (self.out / "paper.md").read_text(encoding="utf-8"))
