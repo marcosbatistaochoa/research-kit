@@ -124,6 +124,16 @@ class RealPdf(unittest.TestCase):
         self.assertEqual(rows[0]["md_sha256"], "")
         self.assertTrue(rows[1]["md_sha256"])
 
+    def test_header_only_legacy_manifest_upgraded(self):
+        self.out.parent.mkdir(parents=True, exist_ok=True)
+        (self.out.parent / "manifest.csv").write_text(
+            "stem,source,sha256,pages,chars_per_page,method,md_path\n", encoding="utf-8")
+        self.assertEqual(self.run_tool(), 0)
+        with open(self.out.parent / "manifest.csv", newline="", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0]["md_sha256"])
+
     def test_layout_flag_recorded(self):
         self.assertEqual(self.run_tool("--layout"), 0)
         self.assertIn("method: pdftotext-layout", (self.out / "paper.md").read_text(encoding="utf-8"))

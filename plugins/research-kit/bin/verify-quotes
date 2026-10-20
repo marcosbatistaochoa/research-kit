@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Verify that every quote in literature notes appears verbatim in its source markdown.
 
-Usage: verify-quotes <note.md...>
+Usage: verify-quotes [--strict] <note.md...>
 
 A note has YAML-style front matter with `citekey` (= the file name), `source_md: <path>`
 (file name = the citekey) and a `quotes:` list of items with `page` and `text` (one-line
@@ -9,7 +9,10 @@ strings; a front-matter line the parser cannot consume is an error). The source 
 page markers `<!-- page N -->` and, when made by pdf2md, an `md_sha256` of its body that is
 re-checked. A quote passes when it has at least 5 words and occurs on its pinned page, on word
 boundaries, after normalising Unicode (NFKC), whitespace, line-break hyphenation and typographic
-quotes/dashes. A note with claims needs quotes. Prints PASS/FAIL per quote;
+quotes/dashes. A note with claims needs quotes. A source with no PDF/md to quote (software, data,
+print book) is declared `source_md: none` + `no_source: <reason>`; such a note has no quotes.
+--strict requires md_sha256 and, when 02_sources/manifest.csv has that column, checks it matches.
+Prints PASS/FAIL per quote;
 exits 1 on any FAIL, 2 on usage error.
 """
 from __future__ import annotations
@@ -19,6 +22,7 @@ import sys
 if sys.version_info < (3, 9):
     sys.exit("verify-quotes needs Python 3.9 or newer")
 
+import csv
 import hashlib
 import json
 import re
@@ -31,27 +35,44 @@ KEY_LINE = re.compile(r"([A-Za-z_][\w-]*)[ \t]*:(?:[ \t]+(.*)|[ \t]*)\Z")
 TRANS = str.maketrans({"‘": "'", "’": "'", "“": '"', "”": '"',
                        "–": "-", "—": "-", " ": " ", "­": ""})
 MIN_WORDS = 5
+MIN_CJK = 15  # characters, for quotes with no spaces
+NEST = "nested mappings are not supported in note front matter"
 _warned: set = set()
 
 
+SUPSUB = re.compile("[\u2070\u00b9\u00b2\u00b3\u2074-\u2079\u2080-\u2089]+")  # footnote digits glued to words
+CJK = "\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af"
+CJK_RE = re.compile(f"[{CJK}]")
+
+
 def _ws(s: str) -> str:
-    return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", s).translate(TRANS)).strip()
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", SUPSUB.sub("", s)).translate(TRANS)).strip()
 
 
 def variants(s: str) -> set[str]:
     """Normalised forms: line-break hyphen dropped, or kept as a real hyphen."""
-    s = unicodedata.normalize("NFKC", s).translate(TRANS)
+    s = unicodedata.normalize("NFKC", SUPSUB.sub("", s)).translate(TRANS)
     return {_ws(re.sub(r"(?<=\w)-[ \t]*\n\s*(?=\w)", repl, s)) for repl in ("", "-")}
 
 
-def contains(want: str, vs) -> bool:
-    """want (already _ws-normalised) occurs in one of the variants, on word boundaries."""
+def find_in(want: str, v: str, pos: int = 0, left: bool = True, right: bool = True, ci: bool = False) -> int:
+    """End index of want (already _ws-normalised) in v at or after pos, on word boundaries
+    (hyphen counts as a word character; no boundary next to CJK); -1 if absent."""
     if not want:
-        return False
-    pat = ("(?<!\\w)" if want[0].isalnum() or want[0] == "_" else "") + re.escape(want) + \
-          ("(?!\\w)" if want[-1].isalnum() or want[-1] == "_" else "")
-    rx = re.compile(pat)
-    return any(rx.search(v) for v in vs)
+        return -1
+    wc = lambda c: c.isalnum() or c in "_-"
+    first = want[0]
+    head = "[" + re.escape(first.lower()) + re.escape(first.upper()) + "]" if ci and first.isalpha() \
+        else re.escape(first)
+    pat = (r"(?<![\w-])" if left and wc(first) and not CJK_RE.match(first) else "") + head + re.escape(want[1:]) + \
+          (r"(?![\w-])" if right and wc(want[-1]) and not CJK_RE.match(want[-1]) else "")
+    m = re.compile(pat).search(v, pos)
+    return m.end() if m else -1
+
+
+def contains(want: str, vs) -> bool:
+    """want occurs in one of the variants, on word boundaries."""
+    return any(find_in(want, v) >= 0 for v in vs)
 
 
 def canonical(text: str) -> str:
@@ -85,7 +106,7 @@ def _scalar(v: str, flow_ok: bool = True) -> str:
         try:
             val, end = json.JSONDecoder().raw_decode(v)
         except ValueError:
-            raise ValueError(f"unterminated or invalid double-quoted string: {v[:40]!r}")
+            raise ValueError(f"unterminated or invalid double-quoted string (keep each quote on one line): {v[:40]!r}")
         if not isinstance(val, str) or not re.fullmatch(r"\s*(#.*)?", v[end:]):
             raise ValueError(f"unexpected text after quoted string: {v[:40]!r}")
         return val
@@ -143,6 +164,8 @@ def parse_note(text: str) -> tuple[dict, list[dict], list[str]]:
                         section = key
                 continue
             if section is None:
+                if KEY_LINE.match(line.strip()):
+                    raise ValueError(NEST)
                 raise ValueError(f"unexpected indented line {line.strip()[:60]!r}")
             body = line.strip()
             if body.startswith("- "):
@@ -164,6 +187,8 @@ def parse_note(text: str) -> tuple[dict, list[dict], list[str]]:
                         meta[section] = []
                     meta[section].append(_scalar(rest))
                     continue
+            elif section != "quotes" and KEY_LINE.match(body):
+                raise ValueError(NEST)
             elif section != "quotes" or cur is None or indent != key_at:
                 raise ValueError(f"cannot parse {body[:60]!r} (wrapped text? use one line)")
             km = KEY_LINE.match(body)
@@ -201,60 +226,101 @@ def find_source(note: Path, ref: str) -> Path | None:
     return None
 
 
-def load_source(src: Path, citekey: str) -> tuple[dict[int, set], str, list[str]]:
-    """(page -> variants, whole-body text, problems). Raises ValueError if unreadable."""
+def manifest_hash(src: Path):
+    """(manifest has an md_sha256 column, that md's last recorded hash or None)."""
+    mf = src.resolve().parent.parent / "manifest.csv"
+    try:
+        with open(mf, newline="", encoding="utf-8-sig") as f:
+            rd = csv.DictReader(f)
+            if "md_sha256" not in (rd.fieldnames or []):
+                return False, None
+            rows = [r for r in rd if r.get("stem") == src.stem]
+    except (OSError, UnicodeDecodeError, csv.Error):
+        return False, None
+    return True, (rows[-1].get("md_sha256") or "").strip().lower() if rows else None
+
+
+def load_source(src: Path, citekey: str, strict=False) -> tuple[dict[int, set], str, list[str]]:
+    """(page -> variants, whole-body text, problems). strict: True, False or "auto" (strict when the
+    project manifest records md_sha256). Raises ValueError if unreadable."""
     text = read_utf8(src)
     fm, body = md_meta(text)
     problems = []
-    want = fm.get("md_sha256", "")
+    has_col, mval = manifest_hash(src)
+    if strict == "auto":
+        strict = has_col
+    want = fm.get("md_sha256", "").lower()
     if want:
-        if body_hash(text) != want.lower():
+        if body_hash(text) != want:
             problems.append(f"source md edited after conversion (md_sha256 mismatch): {src.name}")
+        if strict and has_col and mval != want:
+            problems.append(f"manifest.csv md_sha256 for {src.stem} "
+                            f"{'is missing' if mval is None else 'differs from the md front matter'}; re-run pdf2md --force")
+    elif strict:
+        problems.append(f"{src.name} has no md_sha256; re-run pdf2md --force to record it")
     elif src not in _warned:
         _warned.add(src)
         print(f"WARN {src.name}: no md_sha256 (legacy conversion); edits cannot be detected", file=sys.stderr)
     pdf = fm.get("source", "")
     if pdf and Path(pdf).stem != citekey:
-        problems.append(f"source md names pdf {pdf!r}, not citekey {citekey!r}")
+        problems.append(f"source md names pdf {pdf!r}; {RENAME}")
     return {n: variants(t) for n, t in split_pages(body).items()}, body, problems
 
 
-def check_note_full(note: Path) -> tuple[list[tuple[bool, str]], int, Path | None]:
-    """(results, number of quotes, resolved source md or None)."""
+RENAME = "rename the pdf and md to <citekey>.* and re-run pdf2md (or edit source_md)"
+
+
+def check_note_full(note: Path, strict=False):
+    """(results, number of quotes, resolved source md or None, no-source reason or None)."""
     name = note.name
     try:
         meta, quotes, claims = parse_note(read_utf8(note))
     except (OSError, ValueError) as e:
-        return [(False, f"{name}: cannot read note ({e})")], 0, None
+        return [(False, f"{name}: cannot read note ({e})")], 0, None, None
     out: list[tuple[bool, str]] = []
     ck, ref = str(meta.get("citekey", "")), str(meta.get("source_md", ""))
+    if ref.lower() == "none":  # software, dataset, print book: nothing to quote
+        why = str(meta.get("no_source", "")).strip()
+        if not why:
+            out.append((False, f"{name}: source_md: none needs a reason in no_source: <reason>"))
+        if quotes:
+            out.append((False, f"{name}: a note without a source cannot have quotes"))
+        if ck != note.stem:
+            out.append((False, f"{name}: citekey {ck!r} does not match the file name; rename the note to {ck}.md"))
+        return out or [(True, f"NO-SOURCE: {why} ({name})")], 0, None, why
+    if not (quotes or claims or ref):
+        return [(False, f"{name}: empty note (no quotes, no claims, no source_md; misspelled keys?)")], 0, None, None
     if claims and not quotes:
-        out.append((False, f"{name}: claims without quotes (every claim needs a verified quote)"))
-    if (quotes or ref or claims) and ck != note.stem:
-        out.append((False, f"{name}: citekey {ck!r} does not match the file name {note.stem!r}"))
-    if quotes or ref:
-        if Path(ref).stem != ck:
-            out.append((False, f"{name}: source_md {ref!r} is not the paper {ck!r} (stem must equal the citekey)"))
+        out.append((False, f"{name}: claims without quotes (every claim needs a verified quote); "
+                           "for a source with no text use source_md: none + no_source: <reason>"))
+    if ck != note.stem:
+        out.append((False, f"{name}: citekey {ck!r} does not match the file name {note.stem!r}; "
+                           f"rename the note to {ck}.md"))
+    if (quotes or ref) and Path(ref).stem != ck:
+        out.append((False, f"{name}: source_md {ref!r} is not the paper {ck!r}; {RENAME}"))
     if not quotes:
-        return out or [(True, f"{name}: no quotes")], 0, None
+        return out or [(True, f"{name}: no quotes")], 0, None, None
     src = find_source(note, ref)
     if src is None:
         return out + [(False, f"{name}: quote {i}: source_md not found: {ref!r}")
-                      for i, _ in enumerate(quotes, 1)], len(quotes), None
+                      for i, _ in enumerate(quotes, 1)], len(quotes), None, None
     try:
-        pages, _, problems = load_source(src, ck)
+        pages, _, problems = load_source(src, ck, strict)
     except (OSError, ValueError) as e:
-        return out + [(False, f"{name}: cannot read source md {src.name} ({e})")], len(quotes), src
+        return out + [(False, f"{name}: cannot read source md {src.name} ({e})")], len(quotes), src, None
     out += [(False, f"{name}: {p}") for p in problems]
     for i, q in enumerate(quotes, 1):
         text, page = str(q.get("text", "")), str(q.get("page", "")).strip()
         want = _ws(text)
         label = f"{name}: quote {i} (p. {page})"
+        cjk = " " not in want and CJK_RE.search(want)
         if not want:
             out.append((False, f"{label}: empty quote"))
-        elif len(want.split()) < MIN_WORDS:
+        elif cjk and len(want) < MIN_CJK:
+            out.append((False, f"{label}: quote shorter than {MIN_CJK} characters"))
+        elif not cjk and len(want.split()) < MIN_WORDS:
             out.append((False, f"{label}: quote shorter than {MIN_WORDS} words"))
-        elif not page.isdigit() or int(page) not in pages:
+        elif not (page.isascii() and page.isdigit()) or int(page) not in pages:
             out.append((False, f"{label}: page {page!r} not found in source"))
         elif contains(want, pages[int(page)]):
             out.append((True, label))
@@ -262,11 +328,11 @@ def check_note_full(note: Path) -> tuple[list[tuple[bool, str]], int, Path | Non
             out.append((False, f"{label}: text found on a different page"))
         else:
             out.append((False, f"{label}: text not found in source"))
-    return out, len(quotes), src
+    return out, len(quotes), src, None
 
 
-def check_note(note: Path) -> list[tuple[bool, str]]:
-    return check_note_full(note)[0]
+def check_note(note: Path, strict=False) -> list[tuple[bool, str]]:
+    return check_note_full(note, strict)[0]
 
 
 def main(argv: list[str]) -> int:
@@ -278,13 +344,15 @@ def main(argv: list[str]) -> int:
     if any(a in ("-h", "--help") for a in argv[1:]):
         print(__doc__ + "Requires: python3 >= 3.9 (stdlib only).")
         return 0
-    if len(argv) < 2:
-        print("usage: verify-quotes <note.md...>", file=sys.stderr)
+    strict = "--strict" in argv[1:]
+    files = [a for a in argv[1:] if a != "--strict"]
+    if not files:
+        print("usage: verify-quotes [--strict] <note.md...>", file=sys.stderr)
         return 2
     ok = True
-    for a in argv[1:]:
-        for passed, msg in check_note(Path(a)):
-            print(("PASS " if passed else "FAIL ") + msg)
+    for a in files:
+        for passed, msg in check_note(Path(a), strict):
+            print(msg if msg.startswith("NO-SOURCE:") else ("PASS " if passed else "FAIL ") + msg)
             ok &= passed
     return 0 if ok else 1
 

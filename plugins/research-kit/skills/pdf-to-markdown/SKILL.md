@@ -26,7 +26,8 @@ What it does per PDF:
 4. Writes `<stem>.md` (LF newlines) with a YAML header (source name, sha256, pages, chars per page,
    method, converter, `md_sha256`) and appends a row to `02_sources/manifest.csv`. `md_sha256` hashes
    the markdown body; `verify-quotes` recomputes it, so a hand-edited conversion fails verification.
-   Re-convert with `--force` instead of editing the markdown.
+   Re-convert with `--force` instead of editing the markdown. The hash guards against accidental edits,
+   not a determined forger: the md and manifest sit next to each other in the project.
 
 An existing conversion is never overwritten; pass `--force` to redo it. If a needed program
 (`pdftotext`, `ocrmypdf`, `qpdf`) is missing the tool says which one and moves on to the

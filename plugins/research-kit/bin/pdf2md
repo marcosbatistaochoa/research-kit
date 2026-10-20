@@ -104,18 +104,19 @@ def render(pdf, digest, pages, method):
 
 
 def append_manifest(manifest, row):
-    old = []
+    old, header = [], None
     if manifest.exists():
         with open(manifest, newline="", encoding="utf-8") as f:
-            old = list(csv.DictReader(f))
-    if old:  # legacy manifest without the hash columns: rewrite it with the full header
+            rd = csv.DictReader(f)
+            header, old = rd.fieldnames, list(rd)
+    if header and header != MANIFEST_FIELDS:  # legacy header: rewrite with the current columns
         with open(manifest, "w", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=MANIFEST_FIELDS, restval="")
+            w = csv.DictWriter(f, fieldnames=MANIFEST_FIELDS, restval="", extrasaction="ignore")
             w.writeheader()
             w.writerows(old)
     with open(manifest, "a", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=MANIFEST_FIELDS)
-        if not old and f.tell() == 0:
+        if f.tell() == 0:
             w.writeheader()
         w.writerow(row)
 

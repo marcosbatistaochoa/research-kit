@@ -45,21 +45,21 @@ The notes in this directory are the agents' output, saved unedited.
 
 ```sh
 cd examples/basic
-../../plugins/research-kit/bin/verify-quotes 01_notes/lit/*.md
+../../plugins/research-kit/bin/verify-quotes --strict 01_notes/lit/*.md
 ```
 
 Result: 14 of 14 quotes PASS, exit 0.
 
 ## 5. Negative check: a fabricated quote must fail
 
-`01_notes/negative/lei2023financial-fabricated.md` holds one invented quote, attributed to
+`01_notes/negative/lei2023financial.md` holds one invented quote, attributed to
 a real source.
 
 ```sh
-../../plugins/research-kit/bin/verify-quotes 01_notes/negative/*.md
+../../plugins/research-kit/bin/verify-quotes --strict 01_notes/negative/*.md
 ```
 
-Result: `FAIL … quote 1 (p. 1): text not found in source`, exit 1.
+Result: `FAIL lei2023financial.md: quote 1 (p. 1): text not found in source` (the only failure), exit 1.
 
 ## 6. Page pins checked against the PDFs
 

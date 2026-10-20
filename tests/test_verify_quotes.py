@@ -178,6 +178,34 @@ class VerifyQuotes(unittest.TestCase):
                                            .replace("\n", "\r\n")).encode("utf-8"))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
+    def test_cjk_quote_and_superscript_marker(self):
+        src = "---\ntitle: T\n---\n<!-- page 1 -->\n\u8d27\u5e01\u653f\u7b56\u5728\u7ecf\u6d4e\u5371\u673a\u4e2d\u8d77\u5230\u91cd\u8981\u4f5c\u7528\u3002\nThe top decile\u00b9 earns more.\n"
+        r = self.run_raw(note([(1, "\u8d27\u5e01\u653f\u7b56\u5728\u7ecf\u6d4e\u5371\u673a\u4e2d\u8d77\u5230\u91cd\u8981\u4f5c\u7528")]), src.encode("utf-8"))
+        self.assertEqual(r.returncode, 0, r.stdout)
+        r = self.run_raw(note([(1, "\u8d27\u5e01\u653f\u7b56")]), src.encode("utf-8"))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("15 characters", r.stdout)
+        r = self.run_raw(note([(1, "The top decile earns more.")]), src.encode("utf-8"))
+        self.assertEqual(r.returncode, 0, r.stdout)
+
+    def test_hyphen_is_word_char(self):
+        src = SOURCE.replace("a social", "a non-social")
+        r = self.run_raw(note([(1, "Money is a social convention that")]), src.encode("utf-8"))
+        self.assertEqual(r.returncode, 1)
+
+    def test_parser_messages(self):
+        r = self.run_raw(note(self.GOOD).replace("claims: []", "authors:\n  name: x\nclaims: []"))
+        self.assertIn("nested mappings are not supported", r.stdout)
+        wrapped = note(self.GOOD).replace('text: "Money is a social convention that"',
+                                          'text: "Money is a social\n      convention that"')
+        self.assertIn("keep each quote on one line", self.run_raw(wrapped).stdout)
+
+    def test_stem_messages_say_how_to_fix(self):
+        r = self.run_raw(note(self.GOOD), name="b")
+        self.assertIn("rename the note to a.md", r.stdout)
+        r = self.run_raw(note(self.GOOD).replace("citekey: a", "citekey: b"), name="b")
+        self.assertIn("rename the pdf and md", r.stdout)
+
     def test_usage(self):
         r = subprocess.run([sys.executable, str(TOOL)], capture_output=True, text=True, encoding="utf-8", errors="replace")
         self.assertEqual(r.returncode, 2)

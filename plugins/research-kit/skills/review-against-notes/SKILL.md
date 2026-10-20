@@ -23,8 +23,12 @@ Order matters: mechanical checks first, model judgment second, adversary last. R
    ```
 
    If not on PATH, run it from the kit's plugins/research-kit/bin/. It prints a markdown table:
-   OK, or UNVERIFIED with the reason (no note, a note without quotes, a quote that fails
-   `verify-quotes`, or a "double-quoted" passage in the sentence that is not in the cited source).
+   OK, NO-SOURCE, or UNVERIFIED with the reason (no note, a note without quotes, a quote that fails
+   `verify-quotes`, or a quoted passage of 4+ words in the paragraph that no cited source holds verbatim;
+   check ellipses, `[brackets]`, case, and that every quotation mark is closed). A quote is checked
+   against the sources cited in its paragraph, so cite the paper the quote comes from.
+   NO-SOURCE marks a software, dataset or print-book citation whose note says `source_md: none`; it is
+   not a failure. Never drop such a citation: write a note with `source_md: none` and `no_source: <reason>`.
    It also exits non-zero if the draft has no recognisable citation (`[@key]` or narrative `@key`).
    Resolve UNVERIFIED rows (write or fix the note, fix the quote, or drop the citation) before the
    model passes.

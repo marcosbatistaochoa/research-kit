@@ -27,6 +27,10 @@ Source markdown carries page markers of the form `<!-- page N -->`; quote pages 
    and any claim that depended on it. Never "fix" a quote by paraphrasing. Re-run until it exits 0.
 5. Report `read_scope` for each note to the user; `abstract_only` and `sections` notes must not be cited as full readings.
 
+For a source you cannot convert or quote (software, a dataset, a print book) write the note with
+`source_md: none` and `no_source: <reason>`, claims allowed, no quotes: `check-claims` then shows NO-SOURCE
+instead of failing. Quotes must be at least 5 words long.
+
 Front matter fields: `citekey`, `source_md` (path relative to the project root), `read_scope`
 (`full_text` | `sections` | `abstract_only`), `claims[]`, `quotes[]` with `page` and `text`.
 Write `text` as a double-quoted one-line string (escape inner quotes as `\"`); never wrap it over several

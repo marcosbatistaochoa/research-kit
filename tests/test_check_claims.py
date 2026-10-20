@@ -42,7 +42,7 @@ class CheckClaims(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         for k in "abc":
             self.assertIn("| OK |", self.row(r, k))
-        self.assertIn("2 cited sentence(s)", r.stdout)
+        self.assertIn("1 cited paragraph(s)", r.stdout)
 
     def test_missing_note_is_unverified(self):
         r = self.run_draft("Claim one [@a]. Claim two [@ghost].\n", {"a": OK_NOTE})
@@ -84,7 +84,66 @@ class CheckClaims(unittest.TestCase):
     def test_period_inside_draft_quote_does_not_split(self):
         r = self.run_draft('The text says "Prices rise. Inflation is always" [@a].\n', {"a": OK_NOTE})
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn("1 cited sentence(s)", r.stdout)
+        self.assertIn("1 cited paragraph(s)", r.stdout)
+
+    def test_no_source_note(self):
+        ns = '---\ncitekey: {k}\nsource_md: none\nno_source: software package\nclaims:\n  - "It exists."\nquotes: []\n---\n'
+        r = self.run_draft("We use the tool [@a]. See [@b].\n", {"a": ns, "b": OK_NOTE})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("NO-SOURCE", self.row(r, "a"))
+        r = self.run_draft('The tool says "Money is a social convention that evolved" [@a].\n', {"a": ns})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("UNVERIFIED", self.row(r, "a"))
+
+    def test_no_source_note_in_verify_quotes(self):
+        with tempfile.TemporaryDirectory() as t:
+            n = Path(t) / "a.md"
+            n.write_text('---\ncitekey: a\nsource_md: none\nno_source: print book\nclaims:\n  - "x"\nquotes: []\n---\n',
+                         encoding="utf-8")
+            r = subprocess.run([sys.executable, str(TOOL.parent / "verify-quotes"), str(n)],
+                               capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(r.returncode, 0, r.stdout)
+            self.assertIn("NO-SOURCE: print book", r.stdout)
+            n.write_text(n.read_text(encoding="utf-8").replace("no_source: print book\n", ""), encoding="utf-8")
+            r = subprocess.run([sys.executable, str(TOOL.parent / "verify-quotes"), str(n)],
+                               capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(r.returncode, 1)
+
+    def test_false_citations_ignored(self):
+        for d in ["Mail me at x" + "@lei2023financial.example now.\n", "See https://medium.com/@someauthor/x for more.\n",
+                  "Run `@cache` first.\n", "```\n[@a]\n```\n", "<!-- cite [@a, p. 12] -->\n",
+                  "See medium.com/@someauthor/x here.\n"]:
+            r = self.run_draft(d, {"a": OK_NOTE})
+            self.assertEqual(r.returncode, 1, d)
+            self.assertIn("0 cited paragraph(s)", r.stdout, d)
+
+    def test_key_grammar(self):
+        for d in ["Money @a? yes.\n", "As @a--and so on.\n", "Money [@{a}].\n", "Money [-@a, p. 3].\n", "So @a, said.\n"]:
+            r = self.run_draft(d, {"a": OK_NOTE})
+            self.assertEqual(r.returncode, 0, d + r.stdout + r.stderr)
+            self.assertIn("| a |", r.stdout, d)
+        r = self.run_draft("Money [@{../a}].\n", {"a": OK_NOTE})
+        self.assertEqual(r.returncode, 1)
+
+    def test_draft_quote_matching_is_lenient_where_honest(self):
+        base = "Money is a social convention that evolved over many centuries"
+        for q in [base + ",", base.replace("Money", "money"), "Money is ... evolved over many centuries",
+                  "[M]oney is a social convention that evolved", "Money is a social [convention] that evolved over",
+                  ]:
+            r = self.run_draft(f'Text "{q}" [@a].\n', {"a": OK_NOTE})
+            self.assertEqual(r.returncode, 0, q + r.stdout)
+        # scare quotes and inch marks are not judged
+        r = self.run_draft('A "so called" thing and a 12" ruler [@a].\n', {"a": OK_NOTE})
+        self.assertEqual(r.returncode, 0, r.stdout)
+        # order matters
+        r = self.run_draft('Text "evolved over many centuries ... Money is a social convention" [@a].\n', {"a": OK_NOTE})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("check ellipsis/brackets/case", r.stdout)
+
+    def test_unbalanced_quote_fails(self):
+        r = self.run_draft('He wrote \u201cMoney is invented by aliens in space [@a].\n', {"a": OK_NOTE})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("unbalanced", r.stdout)
 
     def test_zero_citations_fails(self):
         r = self.run_draft("No citation here at all.\n", {"a": OK_NOTE})
@@ -93,7 +152,7 @@ class CheckClaims(unittest.TestCase):
     def test_uncited_sentences_ignored_and_period_in_locator(self):
         r = self.run_draft("No citation here. Cited [@a, p. 3]. Also none.\n", {"a": OK_NOTE})
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn("1 cited sentence(s)", r.stdout)
+        self.assertIn("1 cited paragraph(s)", r.stdout)
 
     def test_usage(self):
         r = subprocess.run([sys.executable, str(TOOL)], capture_output=True, text=True, encoding="utf-8", errors="replace")
