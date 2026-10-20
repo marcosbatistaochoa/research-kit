@@ -290,7 +290,7 @@ def main(argv: list[str]) -> int:
             whole = None
             if src is not None:
                 try:
-                    _, body, _ = vq.load_source(src, k, "auto", vq.project_root(path))
+                    _, body, _ = vq.load_source(src, k, "auto", root=vq.project_root(path))
                     whole = vq.variants(vq.PAGE_RE.sub("\n", body))
                 except (OSError, ValueError):
                     pass

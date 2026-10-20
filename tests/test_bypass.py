@@ -300,6 +300,65 @@ class Bypass(unittest.TestCase):
         (root / "01_notes/lit/lei2023financial.md").write_text(note, encoding="utf-8")
         self.assertRejected(self.run_tool("verify-quotes", root, "01_notes/lit/lei2023financial.md"))
 
+    def test_symlinked_note_cannot_pick_attacker_root(self):
+        root = self.project("lei2023financial")
+        evil = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, evil, True)
+        (evil / "02_sources/md").mkdir(parents=True)
+        (evil / "01_notes/lit").mkdir(parents=True)
+        forged = SRC_MD.read_text(encoding="utf-8") + f"\n<!-- page 3 -->\n{self.F}.\n"
+        h = vq.body_hash(forged)
+        forged = "".join(f"md_sha256: {h}\n" if l.startswith("md_sha256:") else l for l in forged.splitlines(True))
+        (evil / "02_sources/md/lei2023financial.md").write_text(forged, encoding="utf-8", newline="\n")
+        (evil / "02_sources/manifest.csv").write_text(f"stem,md_sha256\nlei2023financial,{h}\n", encoding="utf-8")
+        note = (FIX / "notes/lei2023financial.md").read_text(encoding="utf-8").replace(
+            "Conversely, Zeev (2019) underscores that freely depreciating exchange rates can spur exports", self.F)
+        (evil / "01_notes/lit/lei2023financial.md").write_text(note, encoding="utf-8")
+        (root / "draft.md").write_text(f'Lei writes "{self.F}" [@lei2023financial].\n', encoding="utf-8")
+        lit = root / "01_notes/lit"
+        shutil.rmtree(lit)
+        lit.symlink_to(evil / "01_notes/lit")
+        r = self.run_tool("verify-quotes", root, "01_notes/lit/lei2023financial.md", "--strict")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("outside the project", r.stdout)
+        r = self.run_tool("check-claims", root, "draft.md")
+        self.assertEqual(r.returncode, 1, r.stdout)
+
+    def test_control_project_reached_through_symlink(self):
+        root = self.project("lei2023financial", "genuine")
+        link = Path(tempfile.mkdtemp()) / "link"
+        self.addCleanup(shutil.rmtree, link.parent, True)
+        link.symlink_to(root, target_is_directory=True)
+        r = self.run_tool("verify-quotes", link, "01_notes/lit/lei2023financial.md", "--strict")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        r = self.run_tool("check-claims", link, "draft.md")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_stray_outer_sources_does_not_disable_converted_copy_guard(self):
+        root = self.project("lei2023financial")
+        outer = root.parent / "stray_outer"
+        outer.mkdir()
+        self.addCleanup(shutil.rmtree, outer, True)
+        proj = outer / "proj"
+        shutil.move(str(root), str(proj))
+        (outer / "02_sources").mkdir()
+        ns = '---\ncitekey: lei2023financial\nsource_md: none\nno_source: print\nclaims:\n  - "x"\nquotes: []\n---\n'
+        (proj / "01_notes/lit/lei2023financial.md").write_text(ns, encoding="utf-8")
+        r = self.run_tool("verify-quotes", proj, "01_notes/lit/lei2023financial.md")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("converted copy", r.stdout)
+
+    def test_subdirectory_md_fails_without_manifest(self):
+        root = self.project("lei2023financial")
+        (root / "02_sources/md/x").mkdir()
+        shutil.move(str(root / "02_sources/md/lei2023financial.md"), str(root / "02_sources/md/x/lei2023financial.md"))
+        note = (root / "01_notes/lit/lei2023financial.md").read_text(encoding="utf-8").replace(
+            "02_sources/md/lei2023financial.md", "02_sources/md/x/lei2023financial.md")
+        (root / "01_notes/lit/lei2023financial.md").write_text(note, encoding="utf-8")
+        r = self.run_tool("verify-quotes", root, "01_notes/lit/lei2023financial.md")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("directly in 02_sources/md", r.stdout)
+
     def test_forged_source_outside_sources_and_broken_manifest(self):
         root = self.project("lei2023financial")
         (root / "03_x/md").mkdir(parents=True)
