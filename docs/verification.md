@@ -18,11 +18,14 @@ For each note it checks:
   characters). It must occur on the page the note pins it to, on word boundaries, in the source markdown
   (`02_sources/md/<citekey>.md`, with `<!-- page N -->` markers). Matching normalises Unicode
   (NFKC), whitespace, line-break hyphenation, typographic quotes and dashes, soft hyphens and
-  non-breaking spaces; nothing more. Superscript and subscript digits are kept as distinct
-  characters, never equal to plain digits, in both quote and source (`130⁹` does not match `130`,
-  `10⁹` is not `10³`, `H₂O₂` is not `H₂O`). The one tolerance is for footnote markers on the source
-  side only: a superscript digit run glued directly after a letter or closing punctuation in the
-  source may be absent from the quote. Superscripts and subscripts after digits must match exactly.
+  non-breaking spaces; nothing more. Superscript and subscript digits and signs (`⁺ ⁻ ⁼ ⁽ ⁾ ₊ ₋ ₌ ₍ ₎`) are kept
+  as distinct characters, never equal to plain ones, in both quote and source (`130⁹` does not match `130`,
+  `10⁹` is not `10³`, `H₂O₂` is not `H₂O`, `Ca²⁺` is neither `Ca⁺` nor `Ca+`). Private-use characters in
+  either text are replaced by U+FFFD first, so they never equal those tokens. The one tolerance is for
+  footnote markers on the source side only: a superscript digit run directly after sentence punctuation
+  (`. , ; : ! ?`) or a closing quote and followed by whitespace or the end of the text may be left out of the
+  quote. A superscript glued to a letter, digit, `)`, `]` or `%` (`rates¹`, `m²`, `R²`, `(1+r)²`) must be
+  copied verbatim.
   A quote found only on another page fails ("text found on a different page").
 - **Hashed source.** When the source md records `md_sha256` (written by `pdf2md`), the body is
   re-hashed; an edit after conversion fails. `--strict` requires the hash, and when
@@ -91,6 +94,11 @@ copies", and a model's reading of what they mean still needs your review.
 
 ## Known limits
 
+- **Other Unicode compatibility forms are folded.** Circled, fullwidth and mathematical digits, fractions
+  and superscript letters such as `ⁿ` are folded to plain characters by NFKC on both sides, so a quote may
+  use either form.
+- **Footnote handling is all-or-nothing per quote.** Within one quote, copy every footnote marker
+  verbatim or omit them all; a mix of copied and omitted markers does not match.
 - **Write access defeats the hashes.** The source hash and manifest catch accidental edits. They
   do not protect against someone with write access to the project's own `02_sources/`, who can
   change a source and its hash together.

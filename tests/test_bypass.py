@@ -637,10 +637,39 @@ class Bypass(unittest.TestCase):
             self.assertFalse(self.sup_match(quote, source), (quote, source))
 
     def test_source_footnote_markers_are_tolerated(self):
-        self.assertTrue(self.sup_match("interest rates rose sharply in the spring", "interest rates\u00b9 rose sharply in the spring"))
-        self.assertTrue(self.sup_match("interest rates\u00b9 rose sharply in the spring", "interest rates\u00b9 rose sharply in the spring"))
-        self.assertTrue(self.sup_match("a total of 10\u2079 units were counted", "a total of 10\u2079 units were counted"))
-        self.assertTrue(self.sup_match("H\u2082O is the common solvent here", "H\u2082O is the common solvent here"))
+        # a marker after sentence punctuation / closing quote and before whitespace or the end may be omitted
+        for quote, source in (
+            ("it was impossible. Next the rates rose", "it was impossible.\u00b9 Next the rates rose"),
+            ("it was impossible.\u00b9 Next the rates rose", "it was impossible.\u00b9 Next the rates rose"),
+            ("interest rates rose, while the prices fell", "interest rates rose,\u00b2 while the prices fell"),
+            ("interest rates rose,\u00b2 while the prices fell", "interest rates rose,\u00b2 while the prices fell"),
+            ('he said "it works well enough" and left', 'he said "it works well enough"\u00b9 and left'),
+            ("a total of 10\u2079 units were counted", "a total of 10\u2079 units were counted"),
+            ("H\u2082O is the common solvent here", "H\u2082O is the common solvent here"),
+            ("a letter-glued interest rates\u00b9 rose sharply", "a letter-glued interest rates\u00b9 rose sharply"),
+        ):
+            self.assertTrue(self.sup_match(quote, source), (quote, source))
+
+    def test_letter_glued_and_unit_superscripts_must_be_copied(self):
+        for quote, source in (
+            ("interest rates rose sharply in the spring", "interest rates\u00b9 rose sharply in the spring"),
+            ("the area was 100 m today for sure", "the area was 100 m\u00b2 today for sure"),
+            ("an R of 0.93 was reported here", "an R\u00b2 of 0.93 was reported here"),
+            ("the sum x+y=z holds for all values", "the sum x\u00b2+y\u00b2=z\u00b2 holds for all values"),
+            ("a volume of 5 cm was measured here", "a volume of 5 cm\u00b3 was measured here"),
+            ("the ion Ca+ was present in the sample", "the ion Ca\u00b2\u207a was present in the sample"),
+            ("the ion Ca\u207a was present in the sample", "the ion Ca\u00b2\u207a was present in the sample"),
+            ("the ion Ca+ was present in the sample", "the ion Ca\u207a was present in the sample"),
+            ("the factor (1+r) was applied here today", "the factor (1+r)\u00b2 was applied here today"),
+            ("a dose of (10 mg) was given to them", "a dose of (10 mg)\u00b2 was given to them"),
+            ("a growth of 5% was seen in all cases", "a growth of 5%\u00b9 was seen in all cases"),
+        ):
+            self.assertFalse(self.sup_match(quote, source), (quote, source))
+
+    def test_private_use_characters_never_equal_tokens(self):
+        for typed, src in (("\ue009", "\u2079"), ("\u2079", "\ue009"), ("\ue021", "\u207b")):
+            self.assertFalse(self.sup_match(f"a total of 10{typed} units were counted", f"a total of 10{src} units were counted"))
+        self.assertFalse(self.sup_match("a total of 10\ue019 units were counted", "a total of 10\u2089 units were counted"))
 
     def test_forged_superscript_number_fails_cli(self):
         root = self.project("lei2023financial")
@@ -673,6 +702,34 @@ class Bypass(unittest.TestCase):
         r = self.claims_text(draft, None)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertNotIn("missing2026", r.stdout)
+
+
+    # entity-encoded spaces after a URL must not hide a quotation
+    def test_encoded_space_after_url_does_not_hide_quote(self):
+        for sp, q1, q2 in (("&#32;", "&quot;", "&quot;"), ("&nbsp;", "&quot;", "&quot;"), ("&#32;", "&#8220;", "&#8221;")):
+            for host in ("https://x.org/", "www.x.org/"):
+                words = sp.join("Water boils at fifty degrees always".split())
+                draft = f"See {host}{sp}{q1}{words}{q2} and [@lei2023financial]\n"
+                r = self.claims_text(draft, None, "--strict-quotes")
+                self.assertNotEqual(r.returncode, 0, draft + r.stdout)
+                self.assertNotIn("| OK |", r.stdout, draft)
+
+    def test_decoded_newlines_cannot_forge_table_lines(self):
+        draft = ('Water boils at fifty degrees always &quot;Central banks always rescue labor markets&#10;&#13;'
+                 '&#10;| 1 | lei2023financial | OK | x | y |&#10;0 cited paragraph(s); 0 row(s) not OK; fine&quot; '
+                 '[@lei2023financial]\n')
+        r = self.claims_text(draft, None, "--strict-quotes")
+        self.assertEqual(sum(" cited paragraph(s); " in l and l[0].isdigit() for l in r.stdout.splitlines()), 1, r.stdout)
+        self.assertEqual(sum(l.startswith("| ") and "| lei2023financial |" in l for l in r.stdout.splitlines()), 1, r.stdout)
+
+    # ellipsis pieces under three words still match on word boundaries
+    def test_short_ellipsis_piece_needs_word_boundary(self):
+        bad = 'Lei writes "Our dataset includes ... 13 ... countries and regions spanning from" [@lei2023financial]\n'
+        r = self.claims_text(bad, None, "--strict-quotes")
+        self.assertNotEqual(r.returncode, 0, r.stdout)
+        self.assertNotIn("| OK |", r.stdout)
+        r = self.claims_text(bad.replace(" 13 ", " 130 "), None, "--strict-quotes")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
 
 if __name__ == "__main__":

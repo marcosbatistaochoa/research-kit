@@ -47,10 +47,16 @@ being skipped; entries whose DOI is already present are still skipped.
 
 - `verify-quotes`: superscript and subscript digits are kept as distinct characters instead of being
   erased before matching, so `130⁹` no longer matches `130`, `10⁹` differs from `10³` and `H₂O₂` from `H₂O`.
-  A footnote marker (a superscript digit run glued directly to a letter or closing punctuation in the source)
-  may be absent from the quote. Subscripts, and superscripts after a digit, must match exactly.
+  Superscript and subscript signs (`⁺ ⁻ ⁼ ⁽ ⁾ ₊ ₋ ₌ ₍ ₎`) are distinct too, and private-use characters in
+  either text are replaced by U+FFFD so they never equal those tokens. The only tolerance: a source footnote
+  marker (a superscript digit run) directly after sentence punctuation (`. , ; : ! ?`) or a closing quote and
+  followed by whitespace or the end of the text may be left out of the quote. A superscript glued to a letter,
+  digit, `)`, `]` or `%` (`rates¹`, `m²`, `(1+r)²`) must be copied verbatim.
 - `check-claims`: HTML entities are decoded only after comments and code are masked, so an
   entity-encoded `&lt;!-- ... --&gt;` is visible text and its citations are checked.
+  URLs and emails are masked after decoding, so an entity-encoded space ends a URL; decoded line breaks and
+  control characters become spaces and cannot forge report lines. Ellipsis pieces under three words in a
+  quotation now match on word boundaries too (`... 13 ...` no longer matches inside `130`).
 
 ### Other changes
 

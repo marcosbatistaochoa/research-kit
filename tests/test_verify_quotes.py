@@ -179,13 +179,17 @@ class VerifyQuotes(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
     def test_cjk_quote_and_superscript_marker(self):
-        src = "---\ntitle: T\n---\n<!-- page 1 -->\n\u8d27\u5e01\u653f\u7b56\u5728\u7ecf\u6d4e\u5371\u673a\u4e2d\u8d77\u5230\u91cd\u8981\u4f5c\u7528\u3002\nThe top decile\u00b9 earns more.\n"
+        src = "---\ntitle: T\n---\n<!-- page 1 -->\n\u8d27\u5e01\u653f\u7b56\u5728\u7ecf\u6d4e\u5371\u673a\u4e2d\u8d77\u5230\u91cd\u8981\u4f5c\u7528\u3002\nThe top decile\u00b9 earns more.\nIt ended.\u00b2 Then much more follows.\n"
         r = self.run_raw(note([(1, "\u8d27\u5e01\u653f\u7b56\u5728\u7ecf\u6d4e\u5371\u673a\u4e2d\u8d77\u5230\u91cd\u8981\u4f5c\u7528")]), src.encode("utf-8"))
         self.assertEqual(r.returncode, 0, r.stdout)
         r = self.run_raw(note([(1, "\u8d27\u5e01\u653f\u7b56")]), src.encode("utf-8"))
         self.assertEqual(r.returncode, 1)
         self.assertIn("15 characters", r.stdout)
-        r = self.run_raw(note([(1, "The top decile earns more.")]), src.encode("utf-8"))
+        r = self.run_raw(note([(1, "The top decile\u00b9 earns more.")]), src.encode("utf-8"))
+        self.assertEqual(r.returncode, 0, r.stdout)
+        r = self.run_raw(note([(1, "The top decile earns more.")]), src.encode("utf-8"))  # letter-glued: copy it
+        self.assertEqual(r.returncode, 1)
+        r = self.run_raw(note([(1, "It ended. Then much more follows.")]), src.encode("utf-8"))  # after punctuation: may be omitted
         self.assertEqual(r.returncode, 0, r.stdout)
 
     def test_hyphen_is_word_char(self):
