@@ -47,15 +47,15 @@ being skipped; entries whose DOI is already present are still skipped.
 
 - `verify-quotes`: superscript and subscript digits are kept as distinct characters instead of being
   erased before matching, so `130⁹` no longer matches `130`, `10⁹` differs from `10³` and `H₂O₂` from `H₂O`.
-  A footnote marker (a superscript digit run glued to a letter or closing punctuation) may be absent from the
-  quote only on the source side.
+  A footnote marker (a superscript digit run glued directly to a letter or closing punctuation in the source)
+  may be absent from the quote. Subscripts, and superscripts after a digit, must match exactly.
 - `check-claims`: HTML entities are decoded only after comments and code are masked, so an
   entity-encoded `&lt;!-- ... --&gt;` is visible text and its citations are checked.
 
 ### Other changes
 
 - New `docs/verification.md` states what is checked mechanically and what stays model judgment, with the known limits; linked from the README.
-- README: dropped overclaiming wording; verification is described as page-pinned matching against a hashed markdown copy of the source.
+- README: dropped overclaiming wording; verification is described as page-pinned matching against a markdown copy of the source (hash enforced with `--strict`).
 - CI and `make check` lint every `SKILL.md` (`scripts/lint-skills.py`: front matter, name = folder, existing paths); CI runs `claude plugin validate --strict` when the CLI is present.
 - `tools/banner/fonts/OFL.txt` now says the fonts ship as WOFF2. Plugin version bumped to 0.1.3.
 - `check-claims`: the notes folder is never chosen by position. New `--root <project>` names the project
@@ -96,8 +96,6 @@ Documentation changes made between 0.1.1 and 0.1.2, released with 0.1.2:
 - Clarify support assets, tool paths, template layout, review dependencies,
   Docling pagination and the limits of Windows test evidence.
 - Correct the README's stale version reference to existing plugin version 0.1.1.
-  These documentation changes do not constitute a new version or live install.
-
 ## 0.1.1
 
 - UTF-8 handling for standalone Python tools, including Windows locale handling.
