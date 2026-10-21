@@ -40,9 +40,11 @@ def main():
         help="project directory receiving .agents/skills/research-kit",
     )
     args = parser.parse_args()
-    supplied_project = Path(args.project)
-    if supplied_project.is_symlink():
-        parser.error(f"refusing symlink project: {supplied_project}")
+    supplied_project = Path(args.project).absolute()
+    try:
+        reject_symlink_parents(supplied_project)
+    except ValueError as error:
+        parser.error(str(error))
     project = supplied_project.resolve()
     if not project.is_dir():
         parser.error(f"project is not a directory: {project}")

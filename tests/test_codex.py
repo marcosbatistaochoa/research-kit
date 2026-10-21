@@ -63,14 +63,30 @@ class CodexInstall(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
 
-    @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unavailable")
     def test_symlink_destination_is_refused(self):
         with tempfile.TemporaryDirectory() as temp:
             project = Path(temp)
             (project / ".agents/skills").mkdir(parents=True)
-            os.symlink(project, project / ".agents/skills/research-kit")
+            try:
+                os.symlink(project, project / ".agents/skills/research-kit")
+            except OSError as error:
+                self.skipTest(f"symlink creation unavailable: {error}")
             result = self.install(project)
             self.assertEqual(result.returncode, 2)
+
+    def test_symlink_ancestor_is_refused_without_writing_target(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            target = root / "target"
+            target.mkdir()
+            alias = root / "alias"
+            try:
+                os.symlink(target, alias, target_is_directory=True)
+            except OSError as error:
+                self.skipTest(f"symlink creation unavailable: {error}")
+            result = self.install(alias)
+            self.assertEqual(result.returncode, 2)
+            self.assertFalse((target / ".agents").exists())
 
     def test_installed_helper_verifies_clean_example(self):
         with tempfile.TemporaryDirectory() as temp:

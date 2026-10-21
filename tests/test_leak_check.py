@@ -1,5 +1,6 @@
 import sys
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -25,7 +26,7 @@ PUBLIC_DOCS = (
 )
 
 
-@unittest.skipIf(sys.platform == "win32", "leak-check.sh needs bash")
+@unittest.skipUnless(shutil.which("bash"), "leak-check.sh requires a bash executable")
 class LeakCheck(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -124,8 +125,13 @@ class LeakCheck(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text + "\n", encoding="utf-8")
             self.git("add", name)
-            r = subprocess.run(["bash", str(SCRIPT)], cwd=self.repo, env=env,
-                               capture_output=True, text=True)
+            r = subprocess.run(
+                ["bash", str(SCRIPT)],
+                cwd=self.repo,
+                env=env,
+                capture_output=True,
+                text=True,
+            )
             self.git("reset", "-q")
             self.assertEqual(r.returncode, want, name + text)
 
