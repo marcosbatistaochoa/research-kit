@@ -18,13 +18,17 @@ For each note it checks:
   characters). It must occur on the page the note pins it to, on word boundaries, in the source markdown
   (`02_sources/md/<citekey>.md`, with `<!-- page N -->` markers). Matching normalises Unicode
   (NFKC), whitespace, line-break hyphenation, typographic quotes and dashes, soft hyphens and
-  non-breaking spaces, and drops footnote superscript digits; nothing more.
+  non-breaking spaces; nothing more. Superscript and subscript digits are kept as distinct
+  characters, never equal to plain digits, in both quote and source (`130⁹` does not match `130`,
+  `10⁹` is not `10³`, `H₂O₂` is not `H₂O`). The one tolerance is for footnote markers on the source
+  side only: a superscript digit run glued directly after a letter or closing punctuation in the
+  source may be absent from the quote. Superscripts and subscripts after digits must match exactly.
   A quote found only on another page fails ("text found on a different page").
 - **Hashed source.** When the source md records `md_sha256` (written by `pdf2md`), the body is
   re-hashed; an edit after conversion fails. `--strict` requires the hash, and when
   `02_sources/manifest.csv` has an `md_sha256` column it must match the md.
 - **Names agree.** The note's `citekey` must equal its file name, and `source_md` must be the
-  file `<citekey>.md` sitting directly in `02_sources/md/` (not a subfolder). A note with claims
+  file `<citekey>.md` sitting directly in `02_sources/md/` (not a subfolder); the md's `source:` PDF name must also equal the citekey. A note with claims
   needs quotes. A source that cannot be quoted (software, data, print book) is declared with
   `source_md: none` plus `no_source: <reason>`; such a note may not have quotes.
 - **Fail-closed note parsing.** The front matter is read by a small strict parser. A line it
@@ -51,9 +55,16 @@ running every cited note through the `verify-quotes` checks. It prints one row p
 - `UNCITED`: a quotation (4+ words) in a paragraph with no citation.
 - `UNSOURCED`: informational; the block follows `<!-- unsourced: <reason> -->`.
 
+**Parsing order.** HTML entities are decoded only after comments and code are masked, so an
+entity-encoded `&lt;!-- ... --&gt;` is visible text and its citations are checked.
+
+**What a draft `OK` does not mean.** `check-claims` does not check page numbers in the draft:
+`[@key, p. 999]` next to a genuine quote is `OK`. It also accepts any cited source in the paragraph as
+the holder of a quotation, so attribution to the specific citation is not checked.
+
 **Which notes folder.** With `--root <project>` the notes are `<project>/01_notes/lit`. Without it,
-every `01_notes/lit` found in the draft's ancestors (lexical and physical path) and the current
-directory is a candidate. Exactly one is used; none means "no notes"; more than one stops the run
+every `01_notes/lit` found in the draft's ancestors (lexical and physical path) and in the current
+directory and its ancestors is a candidate. Exactly one is used; none means "no notes"; more than one stops the run
 with exit 2. The folder used is printed to stderr as `notes: <path>`.
 
 **Exit codes.** 1 if any note-level row is `UNVERIFIED` (no note, no quotes, failing note) or no

@@ -18,7 +18,7 @@ A skipped plugin validation is not evidence that native installation works.
 Also run the deliberate negative example from `examples/basic`:
 
 ```sh
-python3 ../../plugins/research-kit/bin/verify-quotes 01_notes/negative/*.md
+python3 ../../plugins/research-kit/bin/verify-quotes --strict 01_notes/negative/*.md
 ```
 
 Exit **1** and a fabricated-quote FAIL are expected. Do not edit the fixture to
