@@ -88,6 +88,15 @@ class CodexInstall(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertFalse((target / ".agents").exists())
 
+    @unittest.skipUnless(sys.platform == "darwin", "macOS system alias")
+    def test_macos_var_temp_alias_is_allowed(self):
+        with tempfile.TemporaryDirectory(dir="/var/tmp") as temp:
+            self.assertTrue(Path(temp).is_relative_to("/var"))
+            project = Path(temp) / "project"
+            project.mkdir()
+            result = self.install(project)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_installed_helper_verifies_clean_example(self):
         with tempfile.TemporaryDirectory() as temp:
             project = Path(temp)

@@ -20,6 +20,18 @@ def reject_symlink_parents(path):
         current = current.parent
 
 
+def resolve_macos_var_alias(path):
+    """Resolve only macOS's system /var alias, not arbitrary user symlinks."""
+    alias = Path("/var")
+    target = Path("/private/var")
+    if sys.platform != "darwin" or not alias.is_symlink() or alias.resolve() != target:
+        return path
+    try:
+        return target / path.relative_to(alias)
+    except ValueError:
+        return path
+
+
 def same_tree(left, right):
     left_entries = sorted(
         p.relative_to(left) for p in left.rglob("*") if not p.is_dir()
@@ -40,7 +52,7 @@ def main():
         help="project directory receiving .agents/skills/research-kit",
     )
     args = parser.parse_args()
-    supplied_project = Path(args.project).absolute()
+    supplied_project = resolve_macos_var_alias(Path(args.project).absolute())
     try:
         reject_symlink_parents(supplied_project)
     except ValueError as error:
