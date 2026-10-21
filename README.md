@@ -2,7 +2,7 @@
 
 **Turn a reading list into source-grounded notes, check a draft against them, and build a paper.**
 
-[Catalog](CATALOG.md) · [Install guide](INSTALL.md) · [Workflow](docs/workflow.md) · [What is verified](docs/verification.md) · [Changelog](CHANGELOG.md)
+[Catalog](CATALOG.md) · [Install guide](INSTALL.md) · [Workflow](docs/workflow.md) · [Lecture quickstart](docs/lecture.md) · [What is verified](docs/verification.md) · [Changelog](CHANGELOG.md)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-8c2f1b?style=flat)](LICENSE) [![Plugin version](https://img.shields.io/badge/plugin-0.1.3-57534e?style=flat)](CHANGELOG.md)
 
@@ -29,6 +29,12 @@ For Codex, from this checkout run `python3 scripts/install-codex.py --project
 C:\path\to\project`). This copies one local skill to
 `.agents/skills/research-kit/`; it is an adapter with tested installation and local
 helpers, not evidence of live Codex discovery or imported Claude permissions.
+
+Checking typed quotations in a saved Word lecture needs neither Zotero nor
+prewritten notes: inventory quotations, explicitly map each CSV row to its
+source Markdown file and page, then run the bindings check. See the
+[lecture quickstart](docs/lecture.md) for native Windows and Unix commands, the
+reproducible Word demo, and the scope of that result.
 
 ## What you get
 

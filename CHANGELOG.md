@@ -42,6 +42,11 @@ being skipped; entries whose DOI is already present are still skipped.
   data, print book); `check-claims` reports it as `NO-SOURCE`.
 - `<!-- unsourced: <reason> -->` marks a draft block whose quotations are deliberately unsourced.
 - Narrative citations (`@key`) are recognised alongside `[@key]`.
+- `docs/lecture.md` adds a concise Word-lecture quickstart: Unix and native Windows Python
+  commands, the reproducible `examples/word/RUN.py --out NEW-DIRECTORY` demonstration,
+  installation of the Codex adapter into a fresh project, and the required user-selected
+  `source_md`/`page` CSV mapping. It states the Word check's source-page-only scope and its
+  absence of Zotero or prewritten-note requirements.
 
 ### Fixed
 
@@ -62,6 +67,7 @@ being skipped; entries whose DOI is already present are still skipped.
 ### Other changes
 
 - New `docs/verification.md` states what is checked mechanically and what stays model judgment, with the known limits; linked from the README.
+- README and INSTALL link the Word lecture quickstart and clarify its portability and adapter setup.
 - README: dropped overclaiming wording; verification is described as page-pinned matching against a markdown copy of the source (hash enforced with `--strict`).
 - CI and `make check` lint every `SKILL.md` (`scripts/lint-skills.py`: front matter, name = folder, existing paths); CI runs `claude plugin validate --strict` when the CLI is present.
 - `tools/banner/fonts/OFL.txt` now says the fonts ship as WOFF2. Plugin version bumped to 0.1.3.
