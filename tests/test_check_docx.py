@@ -229,16 +229,29 @@ class CheckDocx(unittest.TestCase):
             )
 
     def test_cjk_delimiter_report_survives_non_utf8_stdout(self):
-        docx(self.doc, [f"“{QUOTE}” and 「fabricated passage with five ordinary words」"])
+        docx(
+            self.doc, [f"“{QUOTE}” and 「fabricated passage with five ordinary words」"]
+        )
         env = dict(os.environ, PYTHONIOENCODING="cp1252", PYTHONUTF8="0")
         result = subprocess.run(
-            [sys.executable, str(TOOL), "--root", str(self.root),
-             "--inventory", str(Path(self.t.name) / "cp.csv"), str(self.doc)],
-            capture_output=True, env=env,
+            [
+                sys.executable,
+                str(TOOL),
+                "--root",
+                str(self.root),
+                "--inventory",
+                str(Path(self.t.name) / "cp.csv"),
+                str(self.doc),
+            ],
+            capture_output=True,
+            env=env,
         )
-        out = result.stdout.decode("utf-8", "replace") + result.stderr.decode("utf-8", "replace")
+        out = result.stdout.decode("utf-8") + result.stderr.decode("utf-8")
         self.assertEqual(result.returncode, 1, out)
-        self.assertIn("unsupported quotation delimiter", out)
+        self.assertIn(
+            "FAIL coverage body paragraph 1: unsupported quotation delimiter(s) '「', '」'",
+            out,
+        )
         self.assertNotIn("UnicodeEncodeError", out)
 
     def test_csv_formula_encoding_round_trips_before_integrity_checks(self):

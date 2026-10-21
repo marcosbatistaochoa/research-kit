@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "leak-check.sh"
 HOME_PATH = "/ho" + "me/x/notes"  # built in pieces so this file is itself clean
@@ -26,31 +27,94 @@ PUBLIC_DOCS = (
 )
 
 
-def _find_bash():
+def _find_bash(is_windows=None):
     """Absolute path of a usable bash, or None.
 
     On Windows, CreateProcess resolves a bare "bash" to the WSL launcher in System32
     before PATH, so prefer Git for Windows' bash and never accept the System32 one.
     """
+    is_windows = os.name == "nt" if is_windows is None else is_windows
     found = shutil.which("bash")
-    if os.name != "nt":
-        return found
-    sysdir = os.path.normcase(os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), ""))
+    if not is_windows:
+        return str(Path(found).resolve()) if found else None
+    sysdir = os.path.normcase(
+        os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "")
+    )
     if found and not os.path.normcase(os.path.abspath(found)).startswith(sysdir):
-        return found
+        return str(Path(found).resolve())
     git = shutil.which("git")
     if git:
-        base = Path(git).resolve().parent.parent  # <Git>\cmd\git.exe or <Git>\bin\git.exe
+        git_path = Path(git).resolve()
+        parent = git_path.parent
+        if parent.name.lower() == "bin" and parent.parent.name.lower() == "mingw64":
+            base = parent.parent.parent  # <Git>\mingw64\bin\git.exe
+        elif parent.name.lower() in ("cmd", "bin"):
+            base = parent.parent  # <Git>\cmd\git.exe or <Git>\bin\git.exe
+        else:
+            base = None
         for rel in ("bin/bash.exe", "usr/bin/bash.exe"):
-            if (base / rel).is_file():
+            if base and (base / rel).is_file():
                 return str(base / rel)
     return None
+
+
+class FindBash(unittest.TestCase):
+    def test_relative_path_result_becomes_absolute(self):
+        with mock.patch(__name__ + ".shutil.which", return_value="relative/bash"):
+            self.assertEqual(_find_bash(), str(Path("relative/bash").resolve()))
+
+    def test_windows_mingw_git_layout_finds_usr_bash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            git = Path(tmp) / "Git"
+            executable = git / "mingw64/bin/git.exe"
+            bash = git / "usr/bin/bash.exe"
+            executable.parent.mkdir(parents=True)
+            executable.touch()
+            bash.parent.mkdir(parents=True)
+            bash.touch()
+            with (
+                mock.patch(
+                    __name__ + ".shutil.which",
+                    side_effect=lambda name: str(executable) if name == "git" else None,
+                ),
+            ):
+                self.assertEqual(_find_bash(is_windows=True), str(bash))
+
+    def test_windows_standard_git_layout_finds_bin_bash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            git = Path(tmp) / "Git"
+            executable = git / "cmd/git.exe"
+            bash = git / "bin/bash.exe"
+            executable.parent.mkdir(parents=True)
+            executable.touch()
+            bash.parent.mkdir(parents=True)
+            bash.touch()
+            with mock.patch(
+                __name__ + ".shutil.which",
+                side_effect=lambda name: str(executable) if name == "git" else None,
+            ):
+                self.assertEqual(_find_bash(is_windows=True), str(bash))
+
+    def test_windows_system_bash_without_git_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            system_root = Path(tmp) / "Windows"
+            stub = system_root / "System32/bash.exe"
+            with (
+                mock.patch.dict(os.environ, {"SystemRoot": str(system_root)}),
+                mock.patch(
+                    __name__ + ".shutil.which",
+                    side_effect=lambda name: str(stub) if name == "bash" else None,
+                ),
+            ):
+                self.assertIsNone(_find_bash(is_windows=True))
 
 
 BASH = _find_bash()
 
 
-@unittest.skipUnless(BASH, "leak-check.sh requires a non-WSL bash (e.g. Git for Windows)")
+@unittest.skipUnless(
+    BASH, "leak-check.sh requires a non-WSL bash (e.g. Git for Windows)"
+)
 class LeakCheck(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
