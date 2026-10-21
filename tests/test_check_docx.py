@@ -1,5 +1,6 @@
 import csv
 import hashlib
+import os
 import shutil
 import subprocess
 import sys
@@ -59,6 +60,7 @@ class CheckDocx(unittest.TestCase):
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
 
     def inventory(self):
@@ -69,14 +71,14 @@ class CheckDocx(unittest.TestCase):
 
     def bindings(self, mutate=None):
         inv = self.inventory()
-        with inv.open() as f:
+        with inv.open(encoding="utf-8") as f:
             rows = list(csv.DictReader(f))
         for r in rows:
             r["source_md"], r["page"] = "02_sources/md/lei2023financial.md", "2"
         if mutate:
             mutate(rows)
         p = Path(self.t.name) / "bindings.csv"
-        with p.open("w", newline="") as f:
+        with p.open("w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=rows[0])
             w.writeheader()
             w.writerows(rows)
@@ -122,7 +124,7 @@ class CheckDocx(unittest.TestCase):
           <w:ins><w:r><w:t>“{QUOTE}”</w:t></w:r></w:ins></w:p><w:sectPr/></w:body></w:document>''',
         )
         inv = self.inventory()
-        with inv.open() as f:
+        with inv.open(encoding="utf-8") as f:
             self.assertEqual([r["quote"] for r in csv.DictReader(f)], [QUOTE])
         # A field is content-bearing and must downgrade coverage even if a quote was found.
         docx(self.doc, ["“" + QUOTE + "”"], '<w:fldSimple w:instr=" CITATION x "/>')
@@ -138,7 +140,7 @@ class CheckDocx(unittest.TestCase):
             z.writestr("word/footnotes.xml", notes)
             z.writestr("word/endnotes.xml", ends)
         inv = self.inventory()
-        with inv.open() as f:
+        with inv.open(encoding="utf-8") as f:
             self.assertEqual(len(list(csv.DictReader(f))), 2)
 
     def test_note_binding_requires_correct_part_unique_id_and_ignores_cross_type(self):
@@ -146,7 +148,7 @@ class CheckDocx(unittest.TestCase):
         foot = f'<w:footnotes xmlns:w="{W}"><w:footnote w:id="1"><w:p><w:r><w:t>“{QUOTE}”</w:t></w:r></w:p></w:footnote></w:footnotes>'
         end = f'<w:endnotes xmlns:w="{W}"><w:endnote w:id="1"><w:p><w:r><w:t>“{QUOTE}”</w:t></w:r></w:p></w:endnote></w:endnotes>'
         docx_parts(self.doc, body, footnotes=foot, endnotes=end)
-        with self.inventory().open() as f:
+        with self.inventory().open(encoding="utf-8") as f:
             self.assertEqual(len(list(csv.DictReader(f))), 1)
         duplicate = foot.replace(
             "</w:footnotes>", foot.split(">", 1)[1] + "</w:footnotes>"
@@ -209,13 +211,13 @@ class CheckDocx(unittest.TestCase):
             result = self.toolrun("--inventory", inv)
             self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
             self.assertIn("unsupported quotation delimiter", result.stdout)
-            with inv.open() as f:
+            with inv.open(encoding="utf-8") as f:
                 rows = list(csv.DictReader(f))
             self.assertEqual([row["quote"] for row in rows], [QUOTE])
             for row in rows:
                 row["source_md"], row["page"] = "02_sources/md/lei2023financial.md", "2"
             bindings = Path(self.t.name) / (n + "-bindings.csv")
-            with bindings.open("w", newline="") as f:
+            with bindings.open("w", newline="", encoding="utf-8") as f:
                 writer = csv.DictWriter(f, fieldnames=rows[0])
                 writer.writeheader()
                 writer.writerows(rows)
@@ -226,22 +228,35 @@ class CheckDocx(unittest.TestCase):
                 checked.stdout,
             )
 
+    def test_cjk_delimiter_report_survives_non_utf8_stdout(self):
+        docx(self.doc, [f"“{QUOTE}” and 「fabricated passage with five ordinary words」"])
+        env = dict(os.environ, PYTHONIOENCODING="cp1252", PYTHONUTF8="0")
+        result = subprocess.run(
+            [sys.executable, str(TOOL), "--root", str(self.root),
+             "--inventory", str(Path(self.t.name) / "cp.csv"), str(self.doc)],
+            capture_output=True, env=env,
+        )
+        out = result.stdout.decode("utf-8", "replace") + result.stderr.decode("utf-8", "replace")
+        self.assertEqual(result.returncode, 1, out)
+        self.assertIn("unsupported quotation delimiter", out)
+        self.assertNotIn("UnicodeEncodeError", out)
+
     def test_csv_formula_encoding_round_trips_before_integrity_checks(self):
         dangerous = "=1+1 " + QUOTE
         docx(self.doc, ["“" + dangerous + "”"])
         inv = self.inventory()
-        with inv.open() as f:
+        with inv.open(encoding="utf-8") as f:
             row = next(csv.DictReader(f))
         self.assertEqual(row["quote"], "'" + dangerous)
         row["source_md"], row["page"] = "'02_sources/md/lei2023financial.md", "2"
         b = Path(self.t.name) / "dangerous-bindings.csv"
-        with b.open("w", newline="") as f:
+        with b.open("w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=row)
             w.writeheader()
             w.writerow(row)
         # A dangerous quote is safely encoded but decoded before its digest is checked.
         self.assertEqual(self.toolrun("--bindings", b).returncode, 1)
-        with b.open() as f:
+        with b.open(encoding="utf-8") as f:
             self.assertTrue(next(csv.DictReader(f))["quote"].startswith("'="))
 
     def test_malformed_and_hostile_archives_fail(self):

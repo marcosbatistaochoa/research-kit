@@ -26,7 +26,31 @@ PUBLIC_DOCS = (
 )
 
 
-@unittest.skipUnless(shutil.which("bash"), "leak-check.sh requires a bash executable")
+def _find_bash():
+    """Absolute path of a usable bash, or None.
+
+    On Windows, CreateProcess resolves a bare "bash" to the WSL launcher in System32
+    before PATH, so prefer Git for Windows' bash and never accept the System32 one.
+    """
+    found = shutil.which("bash")
+    if os.name != "nt":
+        return found
+    sysdir = os.path.normcase(os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), ""))
+    if found and not os.path.normcase(os.path.abspath(found)).startswith(sysdir):
+        return found
+    git = shutil.which("git")
+    if git:
+        base = Path(git).resolve().parent.parent  # <Git>\cmd\git.exe or <Git>\bin\git.exe
+        for rel in ("bin/bash.exe", "usr/bin/bash.exe"):
+            if (base / rel).is_file():
+                return str(base / rel)
+    return None
+
+
+BASH = _find_bash()
+
+
+@unittest.skipUnless(BASH, "leak-check.sh requires a non-WSL bash (e.g. Git for Windows)")
 class LeakCheck(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -52,7 +76,7 @@ class LeakCheck(unittest.TestCase):
             ),
         )
         return subprocess.run(
-            ["bash", str(SCRIPT), *args],
+            [BASH, str(SCRIPT), *args],
             cwd=self.repo,
             env=env,
             capture_output=True,
@@ -93,7 +117,7 @@ class LeakCheck(unittest.TestCase):
             (self.repo / name).write_text(content + "\n", encoding="utf-8")
             self.git("add", name)
             r = subprocess.run(
-                ["bash", str(SCRIPT)],
+                [BASH, str(SCRIPT)],
                 cwd=self.repo,
                 env=env,
                 capture_output=True,
@@ -126,7 +150,7 @@ class LeakCheck(unittest.TestCase):
             path.write_text(text + "\n", encoding="utf-8")
             self.git("add", name)
             r = subprocess.run(
-                ["bash", str(SCRIPT)],
+                [BASH, str(SCRIPT)],
                 cwd=self.repo,
                 env=env,
                 capture_output=True,
@@ -159,7 +183,7 @@ class LeakCheck(unittest.TestCase):
         self.git("commit", "-qam", "y")
         env = dict(os.environ, RESEARCH_KIT_DENYLIST=str(self.deny))
         run = lambda m: subprocess.run(
-            ["bash", str(SCRIPT), m],
+            [BASH, str(SCRIPT), m],
             cwd=self.repo,
             env=env,
             capture_output=True,
@@ -181,7 +205,7 @@ class LeakCheck(unittest.TestCase):
         env = dict(os.environ, RESEARCH_KIT_DENYLIST=str(self.deny))
         try:
             result = subprocess.run(
-                ["bash", str(SCRIPT), mode],
+                [BASH, str(SCRIPT), mode],
                 cwd=self.repo,
                 env=env,
                 capture_output=True,

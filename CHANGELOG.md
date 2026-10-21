@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- `check-docx` and `build-paper` no longer crash on Windows consoles with a non-UTF-8 code page when
+  printing text such as CJK quotation marks; output is now always UTF-8.
+
 ## 0.1.3
 
 ### Breaking changes (upgrading from 0.1.2)

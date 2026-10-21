@@ -16,6 +16,11 @@ def command_version(command):
 
 
 def main():
+    for _s in (sys.stdout, sys.stderr):  # UTF-8 output regardless of the locale (e.g. Windows cp1252)
+        try:
+            _s.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError, OSError):
+            pass
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--soft", action="store_true", help="report guard failures but exit zero")
     parser.add_argument("--to", choices=("html", "pdf", "docx"), default="pdf",
