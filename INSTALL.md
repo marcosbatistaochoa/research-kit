@@ -64,7 +64,7 @@ Python helpers can run with `python3` and an absolute file path, without PATH or
 executable permissions. For direct execution, retain/set executable permission
 with `chmod +x` on each selected tool. Invoke `build-paper` using `sh`, never Python.
 
-Most helpers can be copied alone. **The two scaffold tools cannot:** retain this
+Most helpers can be copied alone, except that `check-claims` needs `verify-quotes` in the same folder. **The two scaffold tools cannot:** retain this
 layout wherever you put them, selecting only the needed template subtree:
 
 ```text
@@ -114,9 +114,8 @@ not a replacement for instructions in an existing one.
 ## Platform and dependency checklist
 
 Python 3.9+ covers the seven helpers. `pdf2md` additionally needs `pdftotext`
-from Poppler; optional `ocrmypdf` handles scans, `qpdf` encrypted PDFs, and
-Docling its alternative conversion backend. Docling does not preserve original
-page pagination here. Search uses OpenAlex, Semantic Scholar and doi.org.
+from Poppler; optional `ocrmypdf` handles scans and `qpdf` encrypted PDFs. Docling was removed in 0.1.3: `pdf2md --engine docling` is refused
+because its output is one block marked page 1, which breaks page pinning. Search uses OpenAlex, Semantic Scholar and doi.org.
 Set an optional `SEMANTIC_SCHOLAR_API_KEY` in the process environment, never
 in tracked files; without a key Semantic Scholar often returns 429/403.
 Inspect receipts for partial provider coverage. `LIT_SEARCH_MAILTO` is optional.

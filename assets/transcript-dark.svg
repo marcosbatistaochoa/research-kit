@@ -1,16 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="620" height="468" viewBox="0 0 620 468" role="img" aria-label="Terminal transcript">
-<rect width="620" height="468" fill="#0f0d0a"/>
-<rect x="1" y="1" width="618" height="466" fill="#171410" stroke="#f1ece2" stroke-opacity="0.22"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="620" height="500" viewBox="0 0 620 500" role="img" aria-label="Terminal transcript">
+<rect width="620" height="500" fill="#0f0d0a"/>
+<rect x="1" y="1" width="618" height="498" fill="#171410" stroke="#f1ece2" stroke-opacity="0.22"/>
 <rect x="1" y="1" width="618" height="6" fill="#e2855f"/>
 <text x="40" y="84" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="600" fill="#e2855f" xml:space="preserve">$ cd examples/basic</text>
-<text x="40" y="116" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="600" fill="#e2855f" xml:space="preserve">$ verify-quotes 01_notes/lit/*.md</text>
+<text x="40" y="116" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="600" fill="#e2855f" xml:space="preserve">$ verify-quotes --strict 01_notes/lit/*.md</text>
 <text x="40" y="148" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="400" fill="#f1ece2" xml:space="preserve">PASS kireyev2026pricebench.md: quote 1 (p. 1)</text>
 <text x="40" y="180" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="400" fill="#f1ece2" xml:space="preserve">PASS kireyev2026pricebench.md: quote 2 (p. 1)</text>
 <text x="40" y="212" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="400" fill="#f1ece2" xml:space="preserve">PASS kireyev2026pricebench.md: quote 3 (p. 4)</text>
 <text x="40" y="244" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="400" fill="#f1ece2" xml:space="preserve">... 11 more PASS lines (14 of 14 quotes</text>
 <text x="40" y="276" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="400" fill="#f1ece2" xml:space="preserve">  verified), exit 0</text>
-<text x="40" y="308" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="600" fill="#e2855f" xml:space="preserve">$ verify-quotes 01_notes/negative/*.md</text>
-<text x="40" y="340" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="400" fill="#f1ece2" xml:space="preserve">FAIL lei2023financial-fabricated.md: quote 1</text>
-<text x="40" y="372" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="400" fill="#f1ece2" xml:space="preserve">  (p. 1): text not found in source</text>
-<text x="40" y="404" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="400" fill="#f1ece2" xml:space="preserve">(exit 1: the planted fabrication is rejected)</text>
+<text x="40" y="308" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="600" fill="#e2855f" xml:space="preserve">$ verify-quotes --strict</text>
+<text x="40" y="340" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="600" fill="#e2855f" xml:space="preserve">  01_notes/negative/*.md</text>
+<text x="40" y="372" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="400" fill="#f1ece2" xml:space="preserve">FAIL lei2023financial.md: quote 1 (p. 1):</text>
+<text x="40" y="404" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="400" fill="#f1ece2" xml:space="preserve">  text not found in source</text>
+<text x="40" y="436" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" font-weight="400" fill="#f1ece2" xml:space="preserve">(exit 1: the planted fabrication is rejected)</text>
 </svg>

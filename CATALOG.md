@@ -14,7 +14,7 @@ below are workflow artifacts; the main session saves model-returned text.
 |---|---|---|
 | [new-research-project](plugins/research-kit/skills/new-research-project/SKILL.md) | Target directory and question → numbered project tree and filled project kernel | Python 3.9+, `new-project`, `templates/project/`; use for a new, empty target |
 | [literature-search](plugins/research-kit/skills/literature-search/SKILL.md) | Research brief and queries → search CSV, Markdown, receipt; optional BibTeX | `lit-search`, Python, internet; optional Semantic Scholar key and `LIT_SEARCH_MAILTO`; use independently of PDF/note stages |
-| [pdf-to-markdown](plugins/research-kit/skills/pdf-to-markdown/SKILL.md) | PDFs → source Markdown and manifest | `pdf2md`, Python, `pdftotext`; optional OCR/decryption/Docling; use for local sources |
+| [pdf-to-markdown](plugins/research-kit/skills/pdf-to-markdown/SKILL.md) | PDFs → source Markdown and manifest | `pdf2md`, Python, `pdftotext`; optional OCR/decryption; use for local sources |
 | [literature-notes](plugins/research-kit/skills/literature-notes/SKILL.md) | Source Markdown, citekey, reading scope → `01_notes/lit/<citekey>.md`, quote-check results | Full folder including [template.md](plugins/research-kit/skills/literature-notes/template.md), `source-reader`, `verify-quotes`; use on already-converted sources |
 | [review-against-notes](plugins/research-kit/skills/review-against-notes/SKILL.md) | Draft and literature notes → dated review report | `verify-quotes`, `check-claims`, `claim-checker`, `skeptic`; `check-bib` is a useful separate check, not included in this skill's sequence |
 | [paper-build](plugins/research-kit/skills/paper-build/SKILL.md) | `10_paper/paper.md`, metadata, bibliography → bibliography findings, PDF or HTML, log | `check-bib`, `build-paper`, Python, POSIX shell, pandoc; optional XeLaTeX; use on a prepared draft |
@@ -34,7 +34,7 @@ not automatically configure its permissions or model. See [adapters](docs/adapte
 
 ## Eight tools
 
-Seven are Python 3.9+ programs (standard library except optional Docling);
+Seven are Python 3.9+ programs (standard library only);
 `build-paper` is POSIX shell. Each supports `--help`. Invoke by explicit path
 from the working directory indicated in [INSTALL.md](INSTALL.md).
 
@@ -42,10 +42,10 @@ from the working directory indicated in [INSTALL.md](INSTALL.md).
 |---|---|---|
 | [new-project](plugins/research-kit/bin/new-project) | Empty target directory → copied research project | Python; `templates/project/` sibling to `bin/`; refuses nonempty targets |
 | [lit-search](plugins/research-kit/bin/lit-search) | Query/options or DOI export → ranked CSV, Markdown, receipt, optional `.bib` append | Python, internet to OpenAlex/Semantic Scholar/doi.org; optional API key; inspect provider status, never call a partial run complete |
-| [pdf2md](plugins/research-kit/bin/pdf2md) | PDF paths/options → `<stem>.md`, manifest | Python, `pdftotext`; optional `ocrmypdf`, `qpdf`, Docling; existing conversions need `--force` to overwrite |
-| [verify-quotes](plugins/research-kit/bin/verify-quotes) | Notes naming source Markdown, pages and text → per-quote PASS/FAIL, nonzero on failure | Python only; offline; checks text against page markers with whitespace/hyphenation normalization |
-| [check-claims](plugins/research-kit/bin/check-claims) | Pandoc-cited draft and note directory → citation-to-note table | Python only; offline; flags missing/thin notes, does not judge entailment |
-| [check-bib](plugins/research-kit/bin/check-bib) | Bibliography and draft → duplicate/missing-field/DOI/citation findings | Python only; offline; syntax/coverage checks do not verify bibliographic truth |
+| [pdf2md](plugins/research-kit/bin/pdf2md) | PDF paths/options → `<stem>.md`, manifest | Python, `pdftotext`; optional `ocrmypdf`, `qpdf`; `--engine docling` is refused (removed in 0.1.3: one page-1 block breaks page pinning); existing conversions need `--force` to overwrite |
+| [verify-quotes](plugins/research-kit/bin/verify-quotes) | Notes naming source Markdown, pages and text → per-quote PASS/FAIL, nonzero on failure | Python; offline; checks text against page markers with whitespace/hyphenation normalization |
+| [check-claims](plugins/research-kit/bin/check-claims) | Pandoc-cited draft and note directory → citation-to-note table | Python; offline; needs `verify-quotes` in the same folder; verifies quotes of each cited note, does not judge entailment |
+| [check-bib](plugins/research-kit/bin/check-bib) | Bibliography and draft → duplicate/missing-field/DOI/citation findings | Python; offline; syntax/coverage checks do not verify bibliographic truth |
 | [build-paper](plugins/research-kit/bin/build-paper) | Paper directory with Markdown and optional metadata → PDF/HTML and `build.log` | POSIX `sh`, pandoc, optional XeLaTeX and `pdftotext`; guard checks unresolved citations, missing files and `???`; avoid `--soft` for final validation |
 | [new-pipeline](plugins/research-kit/bin/new-pipeline) | Empty target and `--lang python` or `--lang r` → copied pipeline | Python to scaffold; `templates/pipeline/` sibling to `bin/`; Python or R to execute result |
 

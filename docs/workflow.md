@@ -30,8 +30,8 @@ source verification; `check-bib` checks structure and citation coverage offline.
 
 The usual `pdftotext`/OCR conversion emits `<!-- page N -->` markers for extracted
 PDF pages. Those indices may differ from printed page numbers; verify important
-pins and suspect OCR numbers against the PDF. The optional Docling path currently
-puts its whole conversion in one block marked page 1. That marker is not original
+pins and suspect OCR numbers against the PDF. Docling was removed in 0.1.3 and `pdf2md --engine docling`
+is refused: it put its whole conversion in one block marked page 1, which is not original
 pagination and cannot establish a PDF page pin.
 
 `source-reader` reads one source and returns a note using the local template.
@@ -42,7 +42,7 @@ paraphrasing it does not turn it into a verified quotation.
 
 Review first verifies quotes, then maps citations to notes, then judges support
 with `claim-checker`, and finally asks `skeptic` to challenge the strongest claims.
-`check-claims` finds missing or thin notes; only the judgment step evaluates
+`check-claims` runs `verify-quotes` on each cited note and reports uncited or unverified claims; only the judgment step evaluates
 support. `check-bib` is useful alongside review but is not invoked by the
 review-against-notes skill. The author decides draft changes; reviewers return
 findings rather than editing the draft.
