@@ -43,9 +43,11 @@ class Locale(unittest.TestCase):
         self.assertIn("PASS", out)
 
     def test_check_claims(self):
+        write(self.root / "02_sources/md/a.md", f"<!-- page 1 -->\nBy {NAME} wrote this long sentence.\n")
         write(self.root / "01_notes/lit/a.md",
-              f'---\ncitekey: a\nclaims:\n  - "{NAME} claim."\nquotes: []\n---\nbody {NAME}\n')
-        write(self.root / "draft.md", f"{NAME} says [@a].\n")
+              f'---\ncitekey: a\nsource_md: 02_sources/md/a.md\nclaims:\n  - "{NAME} claim."\nquotes:\n'
+              f'  - page: 1\n    text: "By {NAME} wrote this long sentence."\n---\nbody {NAME}\n')
+        write(self.root / "draft.md", f'{NAME} says "wrote this long sentence" [@a].\n')
         rc, out, err = run([sys.executable, str(BIN / "check-claims"), str(self.root / "draft.md")], cwd=self.root)
         self.ok(rc, err)
 
