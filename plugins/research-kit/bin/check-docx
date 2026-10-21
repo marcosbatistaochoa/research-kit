@@ -1,0 +1,316 @@
+#!/usr/bin/env python3
+"""Inventory and verify typed quotations in a saved Word .docx (no Zotero needed).
+
+Usage:
+  check-docx --root PROJECT --inventory NEW.csv [--report NEW_PREFIX] MANUSCRIPT.docx
+  check-docx --root PROJECT --bindings BINDINGS.csv [--report NEW_PREFIX] MANUSCRIPT.docx
+
+The inventory is deliberately incomplete: confirm each source_md and page yourself,
+then verify the bindings.  It never edits the manuscript or infers a source from a
+typed citation.  Requires Python 3.9+ and the standard library only.
+"""
+from __future__ import annotations
+
+import csv
+import hashlib
+import importlib.machinery
+import importlib.util
+import os
+import re
+import sys
+import unicodedata
+import zipfile
+from pathlib import Path
+from xml.etree import ElementTree as ET
+
+NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+MAX_MEMBERS, MAX_MEMBER, MAX_TOTAL = 2000, 20_000_000, 80_000_000
+FIELDS = ("quote_id", "quote", "quote_sha256", "document_sha256", "source_md", "page")
+
+
+def fail(msg, code=1):
+    print(f"FAIL {msg}", file=sys.stderr)
+    return code
+
+
+def under(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def distinct(paths):
+    seen = set()
+    for p in paths:
+        key = str(p.resolve(strict=False))
+        if key in seen:
+            raise ValueError("source, manuscript, mappings, and outputs must not alias")
+        seen.add(key)
+
+
+def xml(data: bytes, name: str):
+    # Decode first so UTF-16 declarations cannot hide a DTD/entity declaration.
+    if any(x in data.lower() for x in (b"<!doctype", b"<!entity", b"<\x00!\x00d\x00o\x00c\x00t\x00y\x00p\x00e", b"\x00<\x00!\x00d\x00o\x00c\x00t\x00y\x00p\x00e")):
+        raise ValueError(f"{name}: DTD/entity declarations are refused")
+    enc = "utf-16" if data[:2] in (b"\xff\xfe", b"\xfe\xff") or b"\x00" in data[:16] else "utf-8-sig"
+    try:
+        text = data.decode(enc)
+    except UnicodeDecodeError as e:
+        raise ValueError(f"{name}: invalid XML encoding ({e})")
+    if re.search(r"<!\s*(?:DOCTYPE|ENTITY)\b", text, re.I):
+        raise ValueError(f"{name}: DTD/entity declarations are refused")
+    try:
+        return ET.fromstring(text)
+    except ET.ParseError as e:
+        raise ValueError(f"{name}: malformed XML ({e})")
+
+
+def open_docx(path: Path):
+    try:
+        z = zipfile.ZipFile(path)
+    except (OSError, zipfile.BadZipFile) as e:
+        raise ValueError(f"not a readable DOCX ZIP ({e})")
+    with z:
+        infos = z.infolist()
+        if len(infos) > MAX_MEMBERS:
+            raise ValueError("archive has too many members")
+        names, total = set(), 0
+        for i in infos:
+            pure = Path(i.filename)
+            if i.filename in names or pure.is_absolute() or ".." in pure.parts or "\\" in i.filename:
+                raise ValueError(f"unsafe or duplicate ZIP member: {i.filename!r}")
+            names.add(i.filename)
+            if i.flag_bits & 1 or i.file_size > MAX_MEMBER:
+                raise ValueError(f"encrypted or oversized ZIP member: {i.filename!r}")
+            total += i.file_size
+            if total > MAX_TOTAL:
+                raise ValueError("archive decompression size limit exceeded")
+        if "word/document.xml" not in names:
+            raise ValueError("missing word/document.xml")
+        return {n: z.read(n) for n in names if n in ("word/document.xml", "word/footnotes.xml", "word/endnotes.xml")}, names
+
+
+def text_of(p):
+    out = []
+    def walk(e, dead=False):
+        dead = dead or e.tag in (NS + "del", NS + "delText", NS + "instrText")
+        if dead:
+            return
+        if e.tag == NS + "t": out.append(e.text or "")
+        elif e.tag == NS + "tab": out.append("\t")
+        elif e.tag in (NS + "br", NS + "cr"): out.append("\n")
+        elif e.tag == NS + "noBreakHyphen": out.append("‑")
+        elif e.tag == NS + "softHyphen": out.append("\u00ad")
+        for child in e: walk(child, dead)
+    walk(p)
+    return "".join(out)
+
+
+def paragraphs(root, allowed_notes=None):
+    rows = []
+    def walk(e, blocked=False):
+        blocked = blocked or e.tag == NS + "txbxContent"
+        if e.tag == NS + "p" and not blocked:
+            rows.append(text_of(e))
+            return
+        for c in e: walk(c, blocked)
+    if allowed_notes is None:
+        body = root.find(NS + "body")
+        if body is not None: walk(body)
+    else:
+        note_tag = NS + ("footnote" if root.tag == NS + "footnotes" else "endnote")
+        for n in root.findall(note_tag):
+            if n.get(NS + "id") in allowed_notes: walk(n)
+    return rows
+
+
+def quoted(part, paras, warnings):
+    out = []
+    for pi, p in enumerate(paras, 1):
+        # Only matched, non-empty double-quoted passages are supported.
+        chars = [(i, c) for i, c in enumerate(p) if c in ('"', '“', '”')]
+        if len(chars) % 2:
+            warnings.append(f"{part} paragraph {pi}: unbalanced or unsupported double quote")
+            continue
+        for n in range(0, len(chars), 2):
+            a, b = chars[n], chars[n + 1]
+            if (a[1], b[1]) not in (("\"", "\""), ("“", "”")):
+                warnings.append(f"{part} paragraph {pi}: unsupported quote delimiter")
+                continue
+            value = p[a[0] + 1:b[0]]
+            if value.strip():
+                out.append((f"{part}:{pi}:{a[0]}", value))
+            else:
+                warnings.append(f"{part} paragraph {pi}: empty double-quoted passage")
+        for i, c in enumerate(p):
+            if c == "‘" or (c == "’" and not (i and i + 1 < len(p) and p[i - 1].isalnum() and p[i + 1].isalnum())):
+                warnings.append(f"{part} paragraph {pi}: unsupported single-quote delimiter")
+                break
+            if c == "'":
+                before = p[i - 1] if i else " "
+                after = p[i + 1] if i + 1 < len(p) else " "
+                if not (before.isalnum() and after.isalnum()):
+                    warnings.append(f"{part} paragraph {pi}: unsupported single-quote delimiter")
+                    break
+    return out
+
+
+UNSUPPORTED = frozenset(NS + tag for tag in (
+    "fldSimple", "fldChar", "instrText", "txbxContent", "altChunk", "object", "drawing",
+))
+
+
+def live_refs(root):
+    """Yield live Word note references; tracked deletions do not contribute content."""
+    out = []
+    def walk(e, dead=False):
+        dead = dead or e.tag in (NS + "del", NS + "delText")
+        if dead:
+            return
+        if e.tag in (NS + "footnoteReference", NS + "endnoteReference"):
+            out.append(("footnote" if e.tag == NS + "footnoteReference" else "endnote", e.get(NS + "id")))
+        for child in e:
+            walk(child, dead)
+    walk(root)
+    return out
+
+
+def extract(path: Path):
+    members, names = open_docx(path)
+    doc = xml(members["word/document.xml"], "document.xml")
+    warnings = []
+    for marker, label in (("word/header", "headers"), ("word/footer", "footers")):
+        if any(n.startswith(marker) and n.endswith(".xml") for n in names): warnings.append(f"content-bearing {label} unsupported")
+    parts = {"body": doc}
+    for member, key in (("word/footnotes.xml", "footnote"), ("word/endnotes.xml", "endnote")):
+        if member in members:
+            parts[key] = xml(members[member], member)
+    for name, root in parts.items():
+        if any(e.tag in UNSUPPORTED for e in root.iter()):
+            warnings.append(f"{name}: unsupported content-bearing structure or citation field")
+    note_maps = {}
+    for kind in ("footnote", "endnote"):
+        root = parts.get(kind)
+        note_maps[kind] = {} if root is None else {
+            note.get(NS + "id"): [n for n in root.findall(NS + kind) if n.get(NS + "id") == note.get(NS + "id")]
+            for note in root.findall(NS + kind)
+        }
+    included = {"footnote": set(), "endnote": set()}
+    pending = list(live_refs(doc))
+    while pending:
+        kind, ident = pending.pop()
+        if not ident or not ident.isdigit() or int(ident) <= 0:
+            warnings.append(f"live {kind} reference has invalid id {ident!r}")
+            continue
+        matches = note_maps[kind].get(ident, [])
+        if len(matches) != 1:
+            warnings.append(f"live {kind} reference id {ident} does not resolve uniquely")
+            continue
+        if ident in included[kind]:
+            continue
+        included[kind].add(ident)
+        pending.extend(live_refs(matches[0]))
+    out = quoted("body", paragraphs(doc), warnings)
+    for member, part in (("word/footnotes.xml", "footnote"), ("word/endnotes.xml", "endnote")):
+        if part in parts: out += quoted(part, paragraphs(parts[part], included[part]), warnings)
+    return out, warnings
+
+
+def sha(s): return hashlib.sha256(s.encode("utf-8")).hexdigest()
+def fcell(s):
+    """Make every untrusted CSV cell spreadsheet-safe without changing its meaning."""
+    return "'" + s if s[:1] in ("'", "=", "+", "-", "@", "\t", "\r") else s
+
+
+def ucell(s):
+    return s[1:] if s[:1] == "'" and s[1:2] in ("'", "=", "+", "-", "@", "\t", "\r") else s
+
+
+def write_csv(path, rows):
+    with path.open("x", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=FIELDS); w.writeheader()
+        w.writerows([{k: fcell(v) for k, v in row.items()} for row in rows])
+
+
+def load_vq(tool: Path):
+    loader = importlib.machinery.SourceFileLoader("check_docx_verify_quotes", str(tool))
+    mod = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader)); loader.exec_module(mod)
+    return mod
+
+
+def main(argv):
+    if len(argv) == 2 and argv[1] in ("-h", "--help"):
+        print(__doc__); return 0
+    args = argv[1:]
+    def take(flag):
+        if args.count(flag) != 1:
+            raise ValueError(f"{flag} is required exactly once")
+        i = args.index(flag)
+        if i + 1 == len(args) or args[i + 1].startswith("--"): raise ValueError(f"{flag} needs a path")
+        return Path(args[i + 1])
+    try:
+        root, inv, bind = take("--root"), (Path(args[args.index("--inventory") + 1]) if "--inventory" in args else None), (Path(args[args.index("--bindings") + 1]) if "--bindings" in args else None)
+        if bool(inv) == bool(bind): raise ValueError("choose exactly one of --inventory or --bindings")
+        report = Path(args[args.index("--report") + 1]) if "--report" in args else None
+        used = {"--root", "--inventory", "--bindings", "--report"}
+        manuscript = [Path(a) for i, a in enumerate(args) if a not in used and (i == 0 or args[i-1] not in used)]
+        if len(manuscript) != 1 or not root.is_dir() or not manuscript[0].is_file(): raise ValueError("need existing PROJECT and one manuscript.docx")
+        outputs = ([inv] if inv else []) + ([Path(str(report) + ".md"), Path(str(report) + ".csv")] if report else [])
+        if any(p.exists() for p in outputs): raise ValueError("output already exists (never overwrites)")
+        distinct(([root, manuscript[0], bind] if bind else [root, manuscript[0]]) + outputs)
+    except (ValueError, IndexError) as e:
+        print(f"usage error: {e}", file=sys.stderr); return 2
+    doc_hash = hashlib.sha256(manuscript[0].read_bytes()).hexdigest()
+    try: quotes, warnings = extract(manuscript[0])
+    except ValueError as e: return fail(str(e))
+    rows = [{"quote_id": qid, "quote": q, "quote_sha256": sha(q), "document_sha256": doc_hash, "source_md": "", "page": ""} for qid, q in quotes]
+    if inv:
+        try: write_csv(inv, rows)
+        except OSError as e: return fail(f"cannot write inventory ({e})", 2)
+        print(f"INVENTORY {len(rows)} quotes: {inv}")
+        return 0 if rows and not warnings else 1
+    try:
+        with bind.open(newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f); bindings = [{k: ucell(v or "") for k, v in row.items()} for row in reader]; got = reader.fieldnames or []
+        if set(FIELDS) - set(got): raise ValueError("bindings missing required inventory columns")
+    except (OSError, ValueError, csv.Error) as e: return fail(f"malformed bindings ({e})", 2)
+    expected, verdicts = {r["quote_id"]: r for r in rows}, []
+    seen = set()
+    vq = load_vq(Path(__file__).with_name("verify-quotes"))
+    for r in bindings:
+        qid = r.get("quote_id", "")
+        if qid in seen: verdicts.append((False, qid, "duplicate binding")); continue
+        seen.add(qid); actual = expected.get(qid)
+        if not actual: verdicts.append((False, qid, "unknown binding")); continue
+        if any(r.get(k, "") != actual[k] for k in ("quote", "quote_sha256", "document_sha256")):
+            verdicts.append((False, qid, "stale quote or document digest")); continue
+        ref, page = r.get("source_md", ""), r.get("page", "")
+        src = root / ref
+        if not ref or not under(src, root / "02_sources/md") or not src.is_file() or not src.resolve().parent == (root / "02_sources/md").resolve():
+            verdicts.append((False, qid, "source_md must be an explicit file directly under root/02_sources/md")); continue
+        if not page.isascii() or not page.isdigit() or int(page) < 1:
+            verdicts.append((False, qid, "page must be a positive integer")); continue
+        want = vq._ws(actual["quote"])
+        if len(want.split()) < vq.MIN_WORDS:
+            verdicts.append((False, qid, f"quote shorter than {vq.MIN_WORDS} words")); continue
+        try: pages, _, problems = vq.load_source(src, src.stem, True, root=root)
+        except (OSError, ValueError) as e: verdicts.append((False, qid, f"cannot read source ({e})")); continue
+        if problems: verdicts.append((False, qid, "; ".join(problems))); continue
+        if int(page) not in pages or not vq.contains(want, pages[int(page)]): verdicts.append((False, qid, "quote not found on mapped page")); continue
+        verdicts.append((True, qid, "QUOTE_MATCH (USER_SELECTED source)"))
+    for qid in expected:
+        if qid not in seen: verdicts.append((False, qid, "missing binding"))
+    if not rows: verdicts.append((False, "coverage", "no supported quotations extracted"))
+    verdicts += [(False, "coverage", w) for w in warnings]
+    for ok, qid, msg in verdicts: print(("PASS" if ok else "FAIL"), qid, msg)
+    if report:
+        try:
+            with Path(str(report) + ".csv").open("x", newline="", encoding="utf-8") as f:
+                w = csv.writer(f); w.writerow(["quote_id", "status", "detail"]); w.writerows([[fcell(q), "PASS" if ok else "FAIL", fcell(m)] for ok,q,m in verdicts])
+            Path(str(report) + ".md").open("x", encoding="utf-8").write(f"# Word quote check\n\nDocument SHA-256: `{doc_hash}`\n\nCoverage: supported body and referenced positive footnotes/endnotes only; QUOTE_MATCH is not a global citation or document-identity pass.\n\n" + "\n".join(f"- {'PASS' if ok else 'FAIL'} `{q}`: {m}" for ok,q,m in verdicts) + "\n")
+        except OSError as e: return fail(f"cannot write report ({e})", 2)
+    return 0 if all(ok for ok, _, _ in verdicts) else 1
+
+if __name__ == "__main__": sys.exit(main(sys.argv))

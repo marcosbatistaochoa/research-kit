@@ -89,6 +89,7 @@ using defaults for notes, bibliography, search output and `10_paper/`:
 python3 "$KIT/bin/lit-search" "your research question" --since 2015 --n 25
 python3 "$KIT/bin/pdf2md" 02_sources/pdf/*.pdf --out 02_sources/md/
 python3 "$KIT/bin/verify-quotes" 01_notes/lit/*.md
+python3 "$KIT/bin/check-docx" --root /absolute/path/to/project --inventory /absolute/path/to/new-word-quotes.csv /absolute/path/to/lecture.docx
 python3 "$KIT/bin/check-claims" 10_paper/paper.md
 python3 "$KIT/bin/check-bib"
 python3 "$KIT/bin/build-paper" --to pdf

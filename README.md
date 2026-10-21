@@ -46,6 +46,7 @@ helpers, not evidence of live Codex discovery or imported Claude permissions.
 | Agent | [skeptic](plugins/research-kit/agents/skeptic.md) | Challenge the strongest claims of a draft |
 | Agent | [pipeline-runner](plugins/research-kit/agents/pipeline-runner.md) | Run a trusted analysis pipeline and report |
 | Tool | [verify-quotes](plugins/research-kit/bin/verify-quotes) | Match each quote, on its stated page, against a markdown copy of the source (hash enforced with `--strict`) |
+| Tool | [check-docx](plugins/research-kit/bin/check-docx) | Inventory and page-verify typed Word quotations without Zotero; see [Word workflow](docs/word.md) |
 | Tool | [lit-search](plugins/research-kit/bin/lit-search) | Literature search with provider receipts |
 | Tool | [pdf2md](plugins/research-kit/bin/pdf2md) | PDF to Markdown with page markers |
 | Tool | [check-claims](plugins/research-kit/bin/check-claims) | Check each cited note (runs `verify-quotes` on it) and flag uncited or unverified claims; does not judge meaning |
