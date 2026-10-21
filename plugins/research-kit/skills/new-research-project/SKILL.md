@@ -10,6 +10,11 @@ Requires: Python 3.9+.
 Scaffold a project with the bundled tool. It copies a fixed template and refuses to
 touch a target directory that already has content.
 
+During setup and on operational failure, follow
+`../../templates/agent-recovery.md` relative to this skill directory: at most two
+environment-only repair attempts within existing permissions, then report.
+An occupied target is not an environment fault; never clear it as a repair.
+
 1. Ask where the project should live if the user has not said. Never pick a path inside
    an existing project.
 2. Run:
