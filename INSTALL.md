@@ -150,3 +150,13 @@ pipeline environment; `uv` and `renv` are optional environment-management tools.
 
 Try the [offline quote check](README.md) before adding network or build
 dependencies. Other-assistant adaptation is described in [docs/adapters.md](docs/adapters.md).
+
+### Word lecture quickstart
+
+For a saved `.docx` with typed quotations, see the [lecture quickstart](docs/lecture.md).
+It distinguishes `python3` on Unix-like systems from `py -3`/`python` on native
+Windows, runs the bundled Word demonstration in a new output directory, and
+has the explicit inventory-to-CSV source/page mapping required for a real
+lecture. This workflow uses neither Zotero nor prewritten notes; its result is
+only a match against each user-chosen source page, not a citation, bibliography
+or global-document check.
