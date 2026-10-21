@@ -1,5 +1,5 @@
-This directory bundles static TTF instances of three OFL-licensed typefaces
-for use in server-side PDF generation (mPDF). Each family retains its own
+This directory bundles WOFF2 font files of three OFL-licensed typefaces
+for the banner and transcript images. Each family retains its own
 SIL Open Font License 1.1 copyright notice below.
 
 ==============================================================================

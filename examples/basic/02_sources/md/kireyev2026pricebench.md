@@ -4,6 +4,8 @@ sha256: a7769fc64ba376b6b16696fecef75330dc6b57ca7aa7f781d5796ab417facf5f
 pages: 19
 chars_per_page: 3712.9
 method: pdftotext
+converter: pdf2md 0.1.3
+md_sha256: c14fc850285ec549ded6b3a9d804fcac105effd87c73fdf7abb10ad02eee25a8
 ---
 <!-- page 1 -->
 PriceBench: A Diagnostic Benchmark for Price, Quality, and Brand

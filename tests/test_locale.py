@@ -1,4 +1,5 @@
 """Tools must work when the locale's default encoding is ASCII (the Windows cp1252 class of failure)."""
+
 import json
 import os
 import subprocess
@@ -10,12 +11,18 @@ from pathlib import Path
 BIN = Path(__file__).resolve().parent.parent / "plugins/research-kit/bin"
 NAME = "Gr\u00e9gory \u010capek \u2014 \u00fc"
 
-ENV = dict(os.environ, LC_ALL="C", PYTHONCOERCECLOCALE="0", PYTHONUTF8="0", PYTHONIOENCODING="")
+ENV = dict(
+    os.environ, LC_ALL="C", PYTHONCOERCECLOCALE="0", PYTHONUTF8="0", PYTHONIOENCODING=""
+)
 
 
 def run(args, cwd=None, env=None):
     r = subprocess.run(args, cwd=cwd, env=env or ENV, capture_output=True, timeout=60)
-    return r.returncode, r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace")
+    return (
+        r.returncode,
+        r.stdout.decode("utf-8", "replace"),
+        r.stderr.decode("utf-8", "replace"),
+    )
 
 
 def write(path, text):
@@ -34,27 +41,55 @@ class Locale(unittest.TestCase):
         self.assertNotIn("Unicode", err)
 
     def test_verify_quotes(self):
-        write(self.root / "02_sources/md/a.md", f"<!-- page 1 -->\nBy {NAME} wrote this.\n")
+        write(
+            self.root / "02_sources/md/a.md",
+            f"<!-- page 1 -->\nBy {NAME} wrote this.\n",
+        )
         note = self.root / "01_notes/lit/a.md"
-        write(note, f'---\ncitekey: a\nsource_md: 02_sources/md/a.md\nread_scope: full_text\n'
-                    f'claims: []\nquotes:\n  - page: 1\n    text: "By {NAME} wrote"\n---\nbody\n')
-        rc, out, err = run([sys.executable, str(BIN / "verify-quotes"), str(note)], cwd=self.root)
+        write(
+            note,
+            f"---\ncitekey: a\nsource_md: 02_sources/md/a.md\nread_scope: full_text\n"
+            f'claims: []\nquotes:\n  - page: 1\n    text: "By {NAME} wrote"\n---\nbody\n',
+        )
+        rc, out, err = run(
+            [sys.executable, str(BIN / "verify-quotes"), str(note)], cwd=self.root
+        )
         self.ok(rc, err)
         self.assertIn("PASS", out)
 
     def test_check_claims(self):
-        write(self.root / "01_notes/lit/a.md",
-              f'---\ncitekey: a\nclaims:\n  - "{NAME} claim."\nquotes: []\n---\nbody {NAME}\n')
-        write(self.root / "draft.md", f"{NAME} says [@a].\n")
-        rc, out, err = run([sys.executable, str(BIN / "check-claims"), str(self.root / "draft.md")], cwd=self.root)
+        write(
+            self.root / "02_sources/md/a.md",
+            f"<!-- page 1 -->\nBy {NAME} wrote this long sentence.\n",
+        )
+        write(
+            self.root / "01_notes/lit/a.md",
+            f'---\ncitekey: a\nsource_md: 02_sources/md/a.md\nclaims:\n  - "{NAME} claim."\nquotes:\n'
+            f'  - page: 1\n    text: "By {NAME} wrote this long sentence."\n---\nbody {NAME}\n',
+        )
+        write(self.root / "draft.md", f'{NAME} says "wrote this long sentence" [@a].\n')
+        rc, out, err = run(
+            [sys.executable, str(BIN / "check-claims"), str(self.root / "draft.md")],
+            cwd=self.root,
+        )
         self.ok(rc, err)
 
     def test_check_bib(self):
-        write(self.root / "r.bib", f"@article{{a2020x,\n  author = {{{NAME}}}, title = {{T}}, year = {{2020}},\n"
-                                   f"  doi = {{10.1234/abc.5}}\n}}\n")
+        write(
+            self.root / "r.bib",
+            f"@article{{a2020x,\n  author = {{{NAME}}}, title = {{T}}, year = {{2020}},\n"
+            f"  doi = {{10.1234/abc.5}}\n}}\n",
+        )
         write(self.root / "p.md", f"{NAME} [@a2020x].\n")
-        rc, out, err = run([sys.executable, str(BIN / "check-bib"), str(self.root / "r.bib"),
-                            str(self.root / "p.md")], cwd=self.root)
+        rc, out, err = run(
+            [
+                sys.executable,
+                str(BIN / "check-bib"),
+                str(self.root / "r.bib"),
+                str(self.root / "p.md"),
+            ],
+            cwd=self.root,
+        )
         self.ok(rc, err)
 
     def _lit_search(self, *argv, key=None):
@@ -70,7 +105,8 @@ class Locale(unittest.TestCase):
             "    if 'doi.org' in url: return bib\n"
             "    if 'openalex' in url: return oa\n"
             "    raise RuntimeError('HTTP 503')\n"
-            "sys.exit(mod.main(sys.argv[1:], fetch=fetch))\n")
+            "sys.exit(mod.main(sys.argv[1:], fetch=fetch))\n"
+        )
         return run([sys.executable, "-c", driver, *argv], cwd=self.root)
 
     def test_lit_search(self):
@@ -87,7 +123,10 @@ class Locale(unittest.TestCase):
         rc, out, err = self._lit_search("--export-bib", "10.1/y", "--bib", "r.bib")
         self.ok(rc, err)
 
-    @unittest.skipIf(sys.platform == "win32", "stub pdftotext is a POSIX shell script")
+    @unittest.skipIf(
+        sys.platform == "win32",
+        "synthetic PATH stub requires POSIX executable resolution; valid-PDF coverage is in test_pdf2md",
+    )
     def test_pdf2md_text_path(self):
         stub = self.root / "stub"
         stub.mkdir()
@@ -97,8 +136,19 @@ class Locale(unittest.TestCase):
         pdf = self.root / "p.pdf"
         pdf.write_bytes(b"%PDF-1.4\n")
         env = dict(ENV, PATH=str(stub) + os.pathsep + os.environ["PATH"])
-        rc, out, err = run([sys.executable, str(BIN / "pdf2md"), str(pdf), "--out", "md", "--threshold", "0"],
-                           cwd=self.root, env=env)
+        rc, out, err = run(
+            [
+                sys.executable,
+                str(BIN / "pdf2md"),
+                str(pdf),
+                "--out",
+                "md",
+                "--threshold",
+                "0",
+            ],
+            cwd=self.root,
+            env=env,
+        )
         self.ok(rc, err)
         self.assertIn(NAME, (self.root / "md/p.md").read_text(encoding="utf-8"))
 

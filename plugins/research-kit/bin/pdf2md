@@ -12,9 +12,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import unicodedata
 from pathlib import Path
 
-MANIFEST_FIELDS = ["stem", "source", "sha256", "pages", "chars_per_page", "method", "md_path"]
+CONVERTER = "pdf2md 0.1.3"
+MANIFEST_FIELDS = ["stem", "source", "sha256", "pages", "chars_per_page", "method", "md_path",
+                   "md_sha256", "converter"]
 
 
 class ToolMissing(Exception):
@@ -60,10 +63,10 @@ def mean_chars(pages):
     return sum(len(p.strip()) for p in pages) / len(pages) if pages else 0.0
 
 
-def docling_pages(pdf):
-    from docling.document_converter import DocumentConverter  # optional
-    md = DocumentConverter().convert(str(pdf)).document.export_to_markdown()
-    return [md]
+def canonical_hash(body):
+    """sha256 of a md body in canonical form (UTF-8, LF newlines, NFC); verify-quotes recomputes it."""
+    b = unicodedata.normalize("NFC", body.replace("\r\n", "\n").replace("\r", "\n"))
+    return hashlib.sha256(b.encode("utf-8")).hexdigest()
 
 
 def convert(pdf, threshold=200, engine="auto", tmp=None, layout=False):
@@ -78,12 +81,6 @@ def convert(pdf, threshold=200, engine="auto", tmp=None, layout=False):
             raise RuntimeError(f"qpdf could not decrypt {pdf}: {r.stderr.strip()}")
         src = dec
         method.append("qpdf")
-    if engine == "docling":
-        try:
-            pages = docling_pages(src)
-        except ImportError:
-            raise ToolMissing("--engine docling requested but docling is not importable")
-        return pages, "+".join(method + ["docling"])
     pages = pdftotext(src, layout)
     method.append("pdftotext-layout" if layout else "pdftotext")
     if mean_chars(pages) < threshold:
@@ -98,17 +95,28 @@ def convert(pdf, threshold=200, engine="auto", tmp=None, layout=False):
 
 def render(pdf, digest, pages, method):
     cpp = round(mean_chars(pages), 1)
+    body = "\n".join(f"<!-- page {i} -->\n{p.strip()}\n" for i, p in enumerate(pages, 1))
+    mdh = canonical_hash(body)
     head = ["---", f"source: {Path(pdf).name}", f"sha256: {digest}", f"pages: {len(pages)}",
-            f"chars_per_page: {cpp}", f"method: {method}", "---", ""]
-    body = [f"<!-- page {i} -->\n{p.strip()}\n" for i, p in enumerate(pages, 1)]
-    return "\n".join(head) + "\n".join(body), cpp
+            f"chars_per_page: {cpp}", f"method: {method}", f"converter: {CONVERTER}",
+            f"md_sha256: {mdh}", "---", ""]
+    return "\n".join(head) + body, cpp, mdh
 
 
 def append_manifest(manifest, row):
-    new = not manifest.exists()
+    old, header = [], None
+    if manifest.exists():
+        with open(manifest, newline="", encoding="utf-8") as f:
+            rd = csv.DictReader(f)
+            header, old = rd.fieldnames, list(rd)
+    if header and header != MANIFEST_FIELDS:  # legacy header: rewrite with the current columns
+        with open(manifest, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=MANIFEST_FIELDS, restval="", extrasaction="ignore")
+            w.writeheader()
+            w.writerows(old)
     with open(manifest, "a", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=MANIFEST_FIELDS)
-        if new:
+        if f.tell() == 0:
             w.writeheader()
         w.writerow(row)
 
@@ -120,14 +128,19 @@ def main(argv=None):
         except (AttributeError, ValueError, OSError):
             pass
     ap = argparse.ArgumentParser(description=__doc__, epilog=(
-        "Requires: python3 >= 3.9, pdftotext (poppler). Optional: ocrmypdf (scans), qpdf (encrypted), docling."))
+        "Requires: python3 >= 3.9, pdftotext (poppler). Optional: ocrmypdf (scans), qpdf (encrypted)."))
     ap.add_argument("pdfs", nargs="+")
     ap.add_argument("--out", default="02_sources/md")
     ap.add_argument("--threshold", type=int, default=200, help="min mean chars/page before OCR")
-    ap.add_argument("--engine", choices=["auto", "docling"], default="auto")
+    ap.add_argument("--engine", choices=["auto", "docling"], default="auto",
+                    help="docling is refused: it has no per-page output, so page pins would be wrong")
     ap.add_argument("--layout", action="store_true", help="use pdftotext -layout (default: reading order)")
     ap.add_argument("--force", action="store_true", help="overwrite existing conversions")
     a = ap.parse_args(argv)
+    if a.engine == "docling":
+        print("error: --engine docling is not supported: it does not produce per-page output, "
+              "so quote page pins would be wrong", file=sys.stderr)
+        return 1
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     manifest = out.parent / "manifest.csv"
@@ -154,11 +167,13 @@ def main(argv=None):
             status = 1
             continue
         digest = sha256(pdf)
-        text, cpp = render(pdf, digest, pages, method)
-        dest.write_text(text, encoding="utf-8")
+        text, cpp, mdh = render(pdf, digest, pages, method)
+        with open(dest, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
         append_manifest(manifest, {"stem": pdf.stem, "source": str(pdf), "sha256": digest,
                                    "pages": len(pages), "chars_per_page": cpp,
-                                   "method": method, "md_path": str(dest)})
+                                   "method": method, "md_path": str(dest),
+                                   "md_sha256": mdh, "converter": CONVERTER})
         print(f"ok: {dest} ({len(pages)} pages, {method})")
     return status
 

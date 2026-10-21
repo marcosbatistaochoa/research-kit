@@ -1,0 +1,1 @@
+“Firstly, while previous studies predominantly address the role of labor market flexibility in financial crisis repercussions at a theoretical level, this paper offers empirical validation.” (Lei, Li, and Mei 2023)

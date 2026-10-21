@@ -273,11 +273,31 @@ def bib_keys(text):
     return set(re.findall(r"@\w+\s*\{\s*([^,\s]+)\s*,", text))
 
 
+def _suffixed(key, taken):
+    """key + a, b, ... z, aa, ab, ... — the first one not in taken."""
+    n = 0
+    while True:
+        i, suf = n, ""
+        while True:
+            suf = chr(97 + i % 26) + suf
+            i = i // 26 - 1
+            if i < 0:
+                break
+        if key + suf not in taken:
+            return key + suf
+        n += 1
+
+
+def bib_dois(text):
+    return {norm_doi(d) for d in re.findall(r"\bdoi\s*=\s*[{\"]\s*([^}\"]+?)\s*[}\"]", text, re.I)}
+
+
 def export_bib(dois, bib_path, fetch=http_get):
-    """Append BibTeX for each DOI via doi.org content negotiation; skip duplicate keys/DOIs."""
+    """Append BibTeX for each DOI via doi.org content negotiation; skip DOIs already present
+    (exact match) and suffix a, b, ... on a citation-key collision."""
     bib_path = Path(bib_path)
     existing = bib_path.read_text(encoding="utf-8") if bib_path.exists() else ""
-    keys, have = bib_keys(existing), existing.lower()
+    keys, have = bib_keys(existing), bib_dois(existing)
     added, skipped, failed = [], [], []
     for raw in dois:
         doi = norm_doi(raw)
@@ -294,11 +314,12 @@ def export_bib(dois, bib_path, fetch=http_get):
         if not m:
             failed.append((doi, "response is not BibTeX"))
             continue
-        if m.group(1) in keys:
-            skipped.append(doi)
-            continue
-        keys.add(m.group(1))
-        have += entry.lower()
+        key = m.group(1)
+        if key in keys:
+            key = _suffixed(key, keys)
+            entry = entry[:m.start(1)] + key + entry[m.end(1):]
+        keys.add(key)
+        have.add(doi)
         added.append(entry)
     if added:
         bib_path.parent.mkdir(parents=True, exist_ok=True)
@@ -327,7 +348,7 @@ def main(argv=None, fetch=http_get):
     a = ap.parse_args(argv)
     if a.export_bib:
         added, skipped, failed = export_bib(a.export_bib, a.bib, fetch)
-        print(f"added {len(added)}, skipped {len(skipped)} (already present), failed {len(failed)}")
+        print(f"added {len(added)}, skipped {len(skipped)} (DOI already present), failed {len(failed)}")
         for d, why in failed:
             print(f"  NOT RESOLVED {d}: {why}")
         return 0 if added or skipped else 1
