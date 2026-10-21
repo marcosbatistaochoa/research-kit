@@ -2,13 +2,13 @@
 
 **Turn a reading list into source-grounded notes, check a draft against them, and build a paper.**
 
-[Catalog](CATALOG.md) · [Install guide](INSTALL.md) · [Workflow](docs/workflow.md) · [Changelog](CHANGELOG.md)
+[Catalog](CATALOG.md) · [Install guide](INSTALL.md) · [Workflow](docs/workflow.md) · [What is verified](docs/verification.md) · [Changelog](CHANGELOG.md)
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-8c2f1b?style=flat)](LICENSE) [![Plugin version](https://img.shields.io/badge/plugin-0.1.2-57534e?style=flat)](CHANGELOG.md)
+[![License: MIT](https://img.shields.io/badge/license-MIT-8c2f1b?style=flat)](LICENSE) [![Plugin version](https://img.shields.io/badge/plugin-0.1.3-57534e?style=flat)](CHANGELOG.md)
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="assets/transcript-dark.svg"><img src="assets/transcript-light.svg" alt="Terminal transcript: verify-quotes passes 14 real quotations and rejects a planted fabrication" width="100%"></picture>
 
-Early-stage plugin **0.1.2**: 7 skills, 4 agent roles, 8 command-line tools and
+Early-stage plugin **0.1.3**: 7 skills, 4 agent roles, 8 command-line tools and
 project, Python and R templates. Install the whole Claude Code plugin or take the
 parts you need. The skills and roles are Markdown instructions; the helpers are
 seven Python programs and one POSIX shell script. Reading a skill does not execute a tool.
@@ -39,7 +39,7 @@ for tool paths, selective installation and existing-settings precautions.
 | Agent | [claim-checker](plugins/research-kit/agents/claim-checker.md) | Judge whether notes support cited claims |
 | Agent | [skeptic](plugins/research-kit/agents/skeptic.md) | Challenge the strongest claims of a draft |
 | Agent | [pipeline-runner](plugins/research-kit/agents/pipeline-runner.md) | Run a trusted analysis pipeline and report |
-| Tool | [verify-quotes](plugins/research-kit/bin/verify-quotes) | Check quotations against converted source text |
+| Tool | [verify-quotes](plugins/research-kit/bin/verify-quotes) | Match each quote, on its stated page, against a hashed markdown copy of the source |
 | Tool | [lit-search](plugins/research-kit/bin/lit-search) | Literature search with provider receipts |
 | Tool | [pdf2md](plugins/research-kit/bin/pdf2md) | PDF to Markdown with page markers |
 | Tool | [check-claims](plugins/research-kit/bin/check-claims) | Find missing or thin notes behind cited claims |
@@ -67,8 +67,8 @@ python3 ../../plugins/research-kit/bin/verify-quotes 01_notes/negative/*.md
 The first command should print **14 of 14 PASS** and exit 0. The second should
 report the fabricated quotation as **FAIL** and exit 1; that failure is expected.
 See the [example walkthrough](examples/basic/RUN.md) and
-[source attribution](examples/basic/SOURCES.md). Quote matching checks converted
-text and page markers, not whether a claim follows from the quotation.
+[source attribution](examples/basic/SOURCES.md). Every quote is matched, on a stated page, against a hashed markdown copy of the source (see [what is verified](docs/verification.md)). That checks converted
+text, not the original PDF and not whether a claim follows from the quotation.
 
 ## How it works
 
