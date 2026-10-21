@@ -39,10 +39,10 @@ for tool paths, selective installation and existing-settings precautions.
 | Agent | [claim-checker](plugins/research-kit/agents/claim-checker.md) | Judge whether notes support cited claims |
 | Agent | [skeptic](plugins/research-kit/agents/skeptic.md) | Challenge the strongest claims of a draft |
 | Agent | [pipeline-runner](plugins/research-kit/agents/pipeline-runner.md) | Run a trusted analysis pipeline and report |
-| Tool | [verify-quotes](plugins/research-kit/bin/verify-quotes) | Match each quote, on its stated page, against a hashed markdown copy of the source |
+| Tool | [verify-quotes](plugins/research-kit/bin/verify-quotes) | Match each quote, on its stated page, against a markdown copy of the source (hash enforced with `--strict`) |
 | Tool | [lit-search](plugins/research-kit/bin/lit-search) | Literature search with provider receipts |
 | Tool | [pdf2md](plugins/research-kit/bin/pdf2md) | PDF to Markdown with page markers |
-| Tool | [check-claims](plugins/research-kit/bin/check-claims) | Find missing or thin notes behind cited claims |
+| Tool | [check-claims](plugins/research-kit/bin/check-claims) | Check each cited note (runs `verify-quotes` on it) and flag uncited or unverified claims; does not judge meaning |
 | Tool | [check-bib](plugins/research-kit/bin/check-bib) | Check bibliography structure and citation coverage |
 | Tool | [build-paper](plugins/research-kit/bin/build-paper) | Build the paper with pandoc (POSIX shell) |
 | Tool | [new-project](plugins/research-kit/bin/new-project) | Scaffold a research project |
@@ -60,14 +60,14 @@ To reproduce it, clone the [repository](https://github.com/nik110403/research-ki
 
 ```sh
 cd examples/basic
-python3 ../../plugins/research-kit/bin/verify-quotes 01_notes/lit/*.md
-python3 ../../plugins/research-kit/bin/verify-quotes 01_notes/negative/*.md
+python3 ../../plugins/research-kit/bin/verify-quotes --strict 01_notes/lit/*.md
+python3 ../../plugins/research-kit/bin/verify-quotes --strict 01_notes/negative/*.md
 ```
 
 The first command should print **14 of 14 PASS** and exit 0. The second should
 report the fabricated quotation as **FAIL** and exit 1; that failure is expected.
 See the [example walkthrough](examples/basic/RUN.md) and
-[source attribution](examples/basic/SOURCES.md). Every quote is matched, on a stated page, against a hashed markdown copy of the source (see [what is verified](docs/verification.md)). That checks converted
+[source attribution](examples/basic/SOURCES.md). Every quote is matched, on a stated page, against a markdown copy of the source; `--strict` also requires that copy's recorded hash to match, which catches accidental edits but not tampering by someone with write access (see [what is verified](docs/verification.md)). That checks converted
 text, not the original PDF and not whether a claim follows from the quotation.
 
 ## How it works
@@ -91,13 +91,12 @@ flowchart LR
 
 ## Configuration
 
-- Python helpers require Python 3.9+ and use the standard library, except the
-  optional Docling conversion backend. Search needs internet access. Semantic
+- Python helpers require Python 3.9+ and use the standard library only. Search needs internet access. Semantic
   Scholar can reject keyless requests; an optional `SEMANTIC_SCHOLAR_API_KEY`
   helps, and receipts report provider failures and partial coverage.
 - PDF conversion needs Poppler's `pdftotext`; scans may need `ocrmypdf`, encrypted
-  files `qpdf`. Docling currently emits one block marked page 1, not original PDF
-  pagination. Recheck page pins against the PDF.
+  files `qpdf`. `pdf2md` refuses `--engine docling` (removed in 0.1.3: its output is one
+  block marked page 1, which breaks page pinning). Recheck page pins against the PDF.
 - Paper builds need POSIX `sh` and pandoc; XeLaTeX enables PDF output, otherwise
   the tool builds HTML. On Windows, use Git Bash or WSL for `build-paper`.
   UTF-8 Python tests do not establish whole-workflow Windows support.
