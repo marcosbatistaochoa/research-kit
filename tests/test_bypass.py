@@ -652,6 +652,8 @@ class Bypass(unittest.TestCase):
 
     def test_letter_glued_and_unit_superscripts_must_be_copied(self):
         for quote, source in (
+            ("the value n! grows quickly with size", "the value n!\u00b2 grows quickly with size"),
+            ("the term f' at the origin is zero", "the term f'\u00b2 at the origin is zero"),
             ("interest rates rose sharply in the spring", "interest rates\u00b9 rose sharply in the spring"),
             ("the area was 100 m today for sure", "the area was 100 m\u00b2 today for sure"),
             ("an R of 0.93 was reported here", "an R\u00b2 of 0.93 was reported here"),

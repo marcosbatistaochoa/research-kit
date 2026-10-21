@@ -47,9 +47,10 @@ being skipped; entries whose DOI is already present are still skipped.
 
 - `verify-quotes`: superscript and subscript digits are kept as distinct characters instead of being
   erased before matching, so `130⁹` no longer matches `130`, `10⁹` differs from `10³` and `H₂O₂` from `H₂O`.
-  Superscript and subscript signs (`⁺ ⁻ ⁼ ⁽ ⁾ ₊ ₋ ₌ ₍ ₎`) are distinct too, and private-use characters in
-  either text are replaced by U+FFFD so they never equal those tokens. The only tolerance: a source footnote
-  marker (a superscript digit run) directly after sentence punctuation (`. , ; : ! ?`) or a closing quote and
+  Superscript and subscript signs (`⁺ ⁻ ⁼ ⁽ ⁾ ₊ ₋ ₌ ₍ ₎`) are distinct too, and private-use characters
+  U+E000\u2013U+E02F are replaced by U+FFFD (so they never equal a tokenised superscript/subscript; they do
+  equal each other and a typed U+FFFD). The only tolerance: a source footnote
+  marker (a superscript digit run) directly after sentence punctuation (`. , ; : ?`) or a closing double quote and
   followed by whitespace or the end of the text may be left out of the quote. A superscript glued to a letter,
   digit, `)`, `]` or `%` (`rates¹`, `m²`, `(1+r)²`) must be copied verbatim.
 - `check-claims`: HTML entities are decoded only after comments and code are masked, so an

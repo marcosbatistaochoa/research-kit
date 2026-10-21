@@ -20,10 +20,11 @@ For each note it checks:
   (NFKC), whitespace, line-break hyphenation, typographic quotes and dashes, soft hyphens and
   non-breaking spaces; nothing more. Superscript and subscript digits and signs (`⁺ ⁻ ⁼ ⁽ ⁾ ₊ ₋ ₌ ₍ ₎`) are kept
   as distinct characters, never equal to plain ones, in both quote and source (`130⁹` does not match `130`,
-  `10⁹` is not `10³`, `H₂O₂` is not `H₂O`, `Ca²⁺` is neither `Ca⁺` nor `Ca+`). Private-use characters in
-  either text are replaced by U+FFFD first, so they never equal those tokens. The one tolerance is for
+  `10⁹` is not `10³`, `H₂O₂` is not `H₂O`, `Ca²⁺` is neither `Ca⁺` nor `Ca+`). Private-use characters
+  U+E000\u2013U+E02F are replaced by U+FFFD (so they never equal a tokenised superscript/subscript; they do
+  equal each other and a typed U+FFFD). The one tolerance is for
   footnote markers on the source side only: a superscript digit run directly after sentence punctuation
-  (`. , ; : ! ?`) or a closing quote and followed by whitespace or the end of the text may be left out of the
+  (`. , ; : ?`) or a closing double quote and followed by whitespace or the end of the text may be left out of the
   quote. A superscript glued to a letter, digit, `)`, `]` or `%` (`rates¹`, `m²`, `R²`, `(1+r)²`) must be
   copied verbatim.
   A quote found only on another page fails ("text found on a different page").
@@ -96,9 +97,13 @@ copies", and a model's reading of what they mean still needs your review.
 
 - **Other Unicode compatibility forms are folded.** Circled, fullwidth and mathematical digits, fractions
   and superscript letters such as `ⁿ` are folded to plain characters by NFKC on both sides, so a quote may
-  use either form.
+  use either form. Subscript letters (`xᵢ` = `xi`), squared-unit glyphs (`㎡` = `m2`) and `™` = `TM` fold too.
 - **Footnote handling is all-or-nothing per quote.** Within one quote, copy every footnote marker
   verbatim or omit them all; a mix of copied and omitted markers does not match.
+- **A footnote marker glued to the following text is not tolerated.** `ended.¹Then` must be copied verbatim.
+- **A word split by a dash at a line end may not match** (pre-existing).
+- **Ellipsis quotes match piece by piece.** Each piece is matched on word boundaries, in order, anywhere
+  after the previous piece, so a quote stitched from scattered single words can pass. Keep ellipsis pieces long.
 - **Write access defeats the hashes.** The source hash and manifest catch accidental edits. They
   do not protect against someone with write access to the project's own `02_sources/`, who can
   change a source and its hash together.
