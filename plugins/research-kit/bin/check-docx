@@ -26,6 +26,7 @@ from xml.etree import ElementTree as ET
 NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 MAX_MEMBERS, MAX_MEMBER, MAX_TOTAL = 2000, 20_000_000, 80_000_000
 FIELDS = ("quote_id", "quote", "quote_sha256", "document_sha256", "source_md", "page")
+UNSUPPORTED_QUOTE_DELIMITERS = frozenset("«»‹›„‚‟‛「」『』〝〞〟")
 
 
 def fail(msg, code=1):
@@ -129,12 +130,17 @@ def paragraphs(root, allowed_notes=None):
 def quoted(part, paras, warnings):
     out = []
     for pi, p in enumerate(paras, 1):
+        unsupported = sorted({c for c in p if c in UNSUPPORTED_QUOTE_DELIMITERS})
+        if unsupported:
+            delimiters = ", ".join(repr(c) for c in unsupported)
+            warnings.append(
+                f"{part} paragraph {pi}: unsupported quotation delimiter(s) {delimiters}"
+            )
         # Only matched, non-empty double-quoted passages are supported.
         chars = [(i, c) for i, c in enumerate(p) if c in ('"', '“', '”')]
         if len(chars) % 2:
             warnings.append(f"{part} paragraph {pi}: unbalanced or unsupported double quote")
-            continue
-        for n in range(0, len(chars), 2):
+        for n in range(0, len(chars) - 1, 2):
             a, b = chars[n], chars[n + 1]
             if (a[1], b[1]) not in (("\"", "\""), ("“", "”")):
                 warnings.append(f"{part} paragraph {pi}: unsupported quote delimiter")
@@ -270,6 +276,8 @@ def main(argv):
         try: write_csv(inv, rows)
         except OSError as e: return fail(f"cannot write inventory ({e})", 2)
         print(f"INVENTORY {len(rows)} quotes: {inv}")
+        for warning in warnings:
+            print("FAIL coverage", warning)
         return 0 if rows and not warnings else 1
     try:
         with bind.open(newline="", encoding="utf-8") as f:

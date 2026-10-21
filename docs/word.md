@@ -4,8 +4,10 @@
 lecture or manuscript with ordinary typed author--year citations and references.
 It does **not** use Zotero, Better BibTeX, a library export, or literature notes.
 
-First inventory the supported double-quoted passages. `--root` is required and
-selects the source collection, even when the Word file is elsewhere.
+First inventory the supported double-quoted passages. Supported delimiters are
+ordinary straight double quotes (`"…"`) and English curly double quotes
+(`“… ”`). `--root` is required and selects the source collection, even when the
+Word file is elsewhere.
 
 ```sh
 python3 "/absolute/path/to/research-kit/plugins/research-kit/bin/check-docx" \
@@ -34,7 +36,13 @@ It reads body/table paragraphs and referenced positive footnotes/endnotes,
 including text split across Word runs. Deleted text is ignored and inserted text
 is included. Headers, footers, text boxes, fields, embedded/altChunk content and
 unsupported/unbalanced quote forms are coverage warnings and make the command
-non-success rather than silently claiming coverage. Outputs are new-only.
+non-success rather than silently claiming coverage. Known unsupported quotation
+delimiters that warn include guillemets (`«»`, `‹›`), German low/high marks
+(`„‚`, `‟‛`), and CJK corner/double-corner marks (`「」`, `『』`, `〝〞〟`). The
+checker does not claim to recognise every quotation or punctuation convention;
+ordinary apostrophes within words remain usable. Inventory prints coverage
+warnings as well as its count, and binding checks carry the same warnings into
+their terminal output and reports. Outputs are new-only.
 For spreadsheet safety, every CSV cell beginning with an apostrophe, `=`, `+`,
 `-`, `@`, tab, or carriage return is prefixed with one apostrophe. The checker
 reverses that prefix when it reads a bindings CSV, so quote hashes and matching

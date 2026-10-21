@@ -198,6 +198,34 @@ class CheckDocx(unittest.TestCase):
                 expected,
             )
 
+    def test_known_unsupported_quote_delimiters_warn_beside_valid_quote(self):
+        for n, unsupported in (
+            ("guillemets", "«fabricated passage with five ordinary words»"),
+            ("low", "„fabricated passage with five ordinary words“"),
+            ("cjk", "「fabricated passage with five ordinary words」"),
+        ):
+            docx(self.doc, [f"“{QUOTE}” and {unsupported}"])
+            inv = Path(self.t.name) / (n + ".csv")
+            result = self.toolrun("--inventory", inv)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn("unsupported quotation delimiter", result.stdout)
+            with inv.open() as f:
+                rows = list(csv.DictReader(f))
+            self.assertEqual([row["quote"] for row in rows], [QUOTE])
+            for row in rows:
+                row["source_md"], row["page"] = "02_sources/md/lei2023financial.md", "2"
+            bindings = Path(self.t.name) / (n + "-bindings.csv")
+            with bindings.open("w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=rows[0])
+                writer.writeheader()
+                writer.writerows(rows)
+            checked = self.toolrun("--bindings", bindings)
+            self.assertEqual(checked.returncode, 1, checked.stdout + checked.stderr)
+            self.assertIn(
+                "FAIL coverage body paragraph 1: unsupported quotation delimiter",
+                checked.stdout,
+            )
+
     def test_csv_formula_encoding_round_trips_before_integrity_checks(self):
         dangerous = "=1+1 " + QUOTE
         docx(self.doc, ["“" + dangerous + "”"])
