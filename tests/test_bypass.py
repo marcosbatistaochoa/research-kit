@@ -22,10 +22,24 @@ _ld.exec_module(vq)
 SRC_MD = ROOT / "examples/basic/02_sources/md/lei2023financial.md"
 
 
+def _can_symlink() -> bool:
+    d = Path(tempfile.mkdtemp())
+    try:
+        (d / "l").symlink_to(d, target_is_directory=True)
+        return True
+    except (OSError, NotImplementedError):
+        return False
+    finally:
+        shutil.rmtree(d, True)
+
+
+needs_symlink = unittest.skipUnless(_can_symlink(), "symlinks unavailable (Windows without privilege)")
+
+
 class Bypass(unittest.TestCase):
     def setUp(self):
         # every temp dir of a test lives under this one fresh parent, never directly in the shared temp dir
-        self.base = Path(tempfile.mkdtemp(prefix="bypass-"))
+        self.base = Path(tempfile.mkdtemp(prefix="bypass-")).resolve()
         self.addCleanup(shutil.rmtree, self.base, True)
         # the tool scans all ancestors, so a stray notes folder above the parent would change results: say so
         for a in self.base.parents:
@@ -33,13 +47,13 @@ class Bypass(unittest.TestCase):
                 self.fail(f"environment has a stray {a / '01_notes/lit'}; remove it before running this suite")
 
     def mk(self):
-        return Path(tempfile.mkdtemp(dir=self.base))
+        return Path(tempfile.mkdtemp(dir=self.base)).resolve()
 
     def project(self, note=None, draft=None, key=None, parent=None):
         """Temp project with Lei's source md, one fixture note (saved as <key>.md) and a draft."""
         t = tempfile.TemporaryDirectory(dir=parent or self.base)
         self.addCleanup(t.cleanup)
-        root = Path(t.name)
+        root = Path(t.name).resolve()
         (root / "02_sources/md").mkdir(parents=True)
         (root / "01_notes/lit").mkdir(parents=True)
         shutil.copy(SRC_MD, root / "02_sources/md")
@@ -126,7 +140,7 @@ class Bypass(unittest.TestCase):
     def test_draft_with_zero_recognised_citations(self):
         self.assertRejected(self.claims("zero_citations", "lei2023financial"))
 
-    # round 1: quote <-> citation attachment and quote forms
+    # quote <-> citation attachment and quote forms
     F = "Central banks always rescue labor markets in every crisis"
     REAL = "Conversely, Zeev (2019) underscores that freely depreciating exchange rates can spur exports"
     OTHER = ('---\ncitekey: other2020\nsource_md: none\nno_source: print book\nclaims:\n  - "x"\nquotes: []\n---\n')
@@ -192,7 +206,7 @@ class Bypass(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("empty note", r.stdout)
 
-    # round 1: hash strictness
+    # hash strictness
     def hashed_project(self, edit=None, drop_hash=False, manifest_hash="same"):
         root = self.project("lei2023financial")
         md = root / "02_sources/md/lei2023financial.md"
@@ -204,7 +218,7 @@ class Bypass(unittest.TestCase):
             text += edit
         if drop_hash:
             text = "".join(l for l in text.splitlines(True) if not l.startswith("md_sha256:"))
-        md.write_text(text, encoding="utf-8", newline="\n")
+        md.write_bytes(text.encode("utf-8"))
         mh = h if manifest_hash == "same" else manifest_hash
         (root / "02_sources/manifest.csv").write_text(
             f"stem,md_sha256\nlei2023financial,{mh}\n", encoding="utf-8")
@@ -233,7 +247,6 @@ class Bypass(unittest.TestCase):
         self.assertIn("manifest.csv", r.stdout)
         self.assertRejected(self.run_tool("check-claims", root, "draft.md"))
 
-    # round 2
     def test_footnote_and_colon_attachment(self):
         self.assertUnverified(f'Lei writes "{self.F}".[^1]\n\n[^1]: See @lei2023financial, p. 9.\n')
         self.assertUnverified(f'As Lei puts it [@lei2023financial]:\n\n- "{self.F}."\n')
@@ -291,7 +304,7 @@ class Bypass(unittest.TestCase):
         forged = (root / "02_sources/md/lei2023financial.md").read_text(encoding="utf-8") + f"\n<!-- page 3 -->\n{self.F}.\n"
         h = vq.body_hash(forged)
         forged = "".join(f"md_sha256: {h}\n" if l.startswith("md_sha256:") else l for l in forged.splitlines(True))
-        (sub / "lei2023financial.md").write_text(forged, encoding="utf-8", newline="\n")
+        (sub / "lei2023financial.md").write_bytes(forged.encode("utf-8"))
         (root / "02_sources/manifest.csv").write_text(f"stem,md_sha256\nlei2023financial,{h}\n", encoding="utf-8")
         note = (FIX / "notes/lei2023financial.md").read_text(encoding="utf-8").replace(
             "02_sources/md/lei2023financial.md", "02_sources/md/x/lei2023financial.md").replace(
@@ -307,13 +320,14 @@ class Bypass(unittest.TestCase):
         (root / "01_notes/02_sources/md").mkdir(parents=True)
         forged = SRC_MD.read_text(encoding="utf-8") + f"\n<!-- page 3 -->\n{self.F}.\n"
         (root / "01_notes/02_sources/md/lei2023financial.md").write_text(forged, encoding="utf-8")
-        self.assertEqual(vq.project_root(root / "01_notes/lit/lei2023financial.md"), root.resolve())
+        self.assertEqual(Path(vq.project_root(root / "01_notes/lit/lei2023financial.md")).resolve(), root.resolve())
         note = (FIX / "notes/lei2023financial.md").read_text(encoding="utf-8").replace(
             "02_sources/md/lei2023financial.md", "01_notes/02_sources/md/lei2023financial.md").replace(
             "Conversely, Zeev (2019) underscores that freely depreciating exchange rates can spur exports", self.F)
         (root / "01_notes/lit/lei2023financial.md").write_text(note, encoding="utf-8")
         self.assertRejected(self.run_tool("verify-quotes", root, "01_notes/lit/lei2023financial.md"))
 
+    @needs_symlink
     def test_symlinked_note_cannot_pick_attacker_root(self):
         root = self.project("lei2023financial")
         evil = Path(self.mk())
@@ -323,7 +337,7 @@ class Bypass(unittest.TestCase):
         forged = SRC_MD.read_text(encoding="utf-8") + f"\n<!-- page 3 -->\n{self.F}.\n"
         h = vq.body_hash(forged)
         forged = "".join(f"md_sha256: {h}\n" if l.startswith("md_sha256:") else l for l in forged.splitlines(True))
-        (evil / "02_sources/md/lei2023financial.md").write_text(forged, encoding="utf-8", newline="\n")
+        (evil / "02_sources/md/lei2023financial.md").write_bytes(forged.encode("utf-8"))
         (evil / "02_sources/manifest.csv").write_text(f"stem,md_sha256\nlei2023financial,{h}\n", encoding="utf-8")
         note = (FIX / "notes/lei2023financial.md").read_text(encoding="utf-8").replace(
             "Conversely, Zeev (2019) underscores that freely depreciating exchange rates can spur exports", self.F)
@@ -338,6 +352,7 @@ class Bypass(unittest.TestCase):
         r = self.run_tool("check-claims", root, "draft.md")
         self.assertEqual(r.returncode, 1, r.stdout)
 
+    @needs_symlink
     def test_control_project_reached_through_symlink(self):
         root = self.project("lei2023financial", "genuine")
         link = Path(self.mk()) / "link"
@@ -397,7 +412,7 @@ class Bypass(unittest.TestCase):
         forged = SRC_MD.read_text(encoding="utf-8") + f"\n<!-- page 3 -->\n{self.F}.\n"
         h = vq.body_hash(forged)
         forged = "".join(f"md_sha256: {h}\n" if l.startswith("md_sha256:") else l for l in forged.splitlines(True))
-        (base / "02_sources/md/lei2023financial.md").write_text(forged, encoding="utf-8", newline="\n")
+        (base / "02_sources/md/lei2023financial.md").write_bytes(forged.encode("utf-8"))
         (base / "02_sources/manifest.csv").write_text(f"stem,md_sha256\nlei2023financial,{h}\n", encoding="utf-8")
 
     def test_planted_pair_inside_notes_cannot_pick_root(self):
@@ -407,7 +422,7 @@ class Bypass(unittest.TestCase):
             "Conversely, Zeev (2019) underscores that freely depreciating exchange rates can spur exports", self.F)
         (root / "01_notes/lit/lei2023financial.md").write_text(note, encoding="utf-8")
         (root / "draft.md").write_text(f'Lei writes "{self.F}" [@lei2023financial].\n', encoding="utf-8")
-        self.assertEqual(vq.project_root(root / "01_notes/lit/lei2023financial.md"), root)
+        self.assertEqual(Path(vq.project_root(root / "01_notes/lit/lei2023financial.md")).resolve(), root.resolve())
         r = self.run_tool("verify-quotes", root, "01_notes/lit/lei2023financial.md", "--strict")
         self.assertEqual(r.returncode, 1, r.stdout)
         r = self.run_tool("check-claims", root, "draft.md", "--strict-quotes")
@@ -439,6 +454,7 @@ class Bypass(unittest.TestCase):
         r = self.run_tool("check-claims", root, "10_paper/ch.md", "--strict-quotes")
         self.assertNotIn("NO-SOURCE", r.stdout, r.stdout)  # real note is used, not the planted one
 
+    @needs_symlink
     def test_symlink_steering_root_rejected(self):
         root = self.project("lei2023financial")
         inner = root / "01_notes/lit/inner"
@@ -458,6 +474,7 @@ class Bypass(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout)
         self.assertIn("not under", r.stdout)
 
+    @needs_symlink
     def test_control_symlinked_sources_dir(self):
         for sub in ("02_sources", "02_sources/md"):
             root = self.project("lei2023financial", "genuine")
@@ -475,7 +492,7 @@ class Bypass(unittest.TestCase):
         root = self.project("lei2023financial", "genuine")
         (root / "01_notes/lit/sub").mkdir()
         shutil.move(str(root / "01_notes/lit/lei2023financial.md"), str(root / "01_notes/lit/sub"))
-        self.assertEqual(vq.project_root(root / "01_notes/lit/sub/lei2023financial.md"), root)
+        self.assertEqual(Path(vq.project_root(root / "01_notes/lit/sub/lei2023financial.md")).resolve(), root.resolve())
         r = self.run_tool("verify-quotes", root, "01_notes/lit/sub/lei2023financial.md", "--strict")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
@@ -532,6 +549,7 @@ class Bypass(unittest.TestCase):
         r = self.run_tool("check-claims", root, str(draft), "--strict-quotes", "--root", str(root))
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
 
+    @needs_symlink
     def test_symlinked_paper_dir_with_pair_never_ok(self):
         root = self.project("lei2023financial")
         ext = Path(self.mk())
@@ -571,6 +589,8 @@ class Bypass(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
 
     def test_unreadable_planted_notes_folder_exits_2(self):
+        if sys.platform == "win32" or not hasattr(os, "geteuid"):
+            self.skipTest("POSIX file modes only")
         if os.geteuid() == 0:
             self.skipTest("root ignores file modes")
         sandbox = self.mk()
@@ -598,6 +618,118 @@ class Bypass(unittest.TestCase):
 
     def test_short_quotes_add_up(self):
         self.assertUnverified('Lei [@lei2023financial] says "always rescue" and "labor markets" and "every crisis".\n')
+
+
+    # super/subscript digits: never erased, never equal to plain digits; footnote tolerance is source-side only
+    def sup_match(self, quote, source):
+        want = vq._ws(quote)
+        return vq.contains(want, vq.variants(source))
+
+    def test_altered_numbers_with_super_subscripts_fail(self):
+        for quote, source in (
+            ("Our dataset includes 130\u2079 countries and regions", "Our dataset includes 130 countries and regions"),
+            ("the sample of H\u2082O\u2082 molecules was large", "the sample of H\u2082O molecules was large"),
+            ("a total of 10\u2079 units were counted", "a total of 10\u00b3 units were counted"),
+            ("a total of 109 units were counted", "a total of 10\u2079 units were counted"),
+            ("a total of 10 units were counted today", "a total of 10\u2079 units were counted today"),
+            ("an area of 5 m\u00b3 was measured", "an area of 5 m\u00b2 was measured"),
+        ):
+            self.assertFalse(self.sup_match(quote, source), (quote, source))
+
+    def test_source_footnote_markers_are_tolerated(self):
+        # a marker after sentence punctuation / closing quote and before whitespace or the end may be omitted
+        for quote, source in (
+            ("it was impossible. Next the rates rose", "it was impossible.\u00b9 Next the rates rose"),
+            ("it was impossible.\u00b9 Next the rates rose", "it was impossible.\u00b9 Next the rates rose"),
+            ("interest rates rose, while the prices fell", "interest rates rose,\u00b2 while the prices fell"),
+            ("interest rates rose,\u00b2 while the prices fell", "interest rates rose,\u00b2 while the prices fell"),
+            ('he said "it works well enough" and left', 'he said "it works well enough"\u00b9 and left'),
+            ("a total of 10\u2079 units were counted", "a total of 10\u2079 units were counted"),
+            ("H\u2082O is the common solvent here", "H\u2082O is the common solvent here"),
+            ("a letter-glued interest rates\u00b9 rose sharply", "a letter-glued interest rates\u00b9 rose sharply"),
+        ):
+            self.assertTrue(self.sup_match(quote, source), (quote, source))
+
+    def test_letter_glued_and_unit_superscripts_must_be_copied(self):
+        for quote, source in (
+            ("interest rates rose sharply in the spring", "interest rates\u00b9 rose sharply in the spring"),
+            ("the area was 100 m today for sure", "the area was 100 m\u00b2 today for sure"),
+            ("an R of 0.93 was reported here", "an R\u00b2 of 0.93 was reported here"),
+            ("the sum x+y=z holds for all values", "the sum x\u00b2+y\u00b2=z\u00b2 holds for all values"),
+            ("a volume of 5 cm was measured here", "a volume of 5 cm\u00b3 was measured here"),
+            ("the ion Ca+ was present in the sample", "the ion Ca\u00b2\u207a was present in the sample"),
+            ("the ion Ca\u207a was present in the sample", "the ion Ca\u00b2\u207a was present in the sample"),
+            ("the ion Ca+ was present in the sample", "the ion Ca\u207a was present in the sample"),
+            ("the factor (1+r) was applied here today", "the factor (1+r)\u00b2 was applied here today"),
+            ("a dose of (10 mg) was given to them", "a dose of (10 mg)\u00b2 was given to them"),
+            ("a growth of 5% was seen in all cases", "a growth of 5%\u00b9 was seen in all cases"),
+        ):
+            self.assertFalse(self.sup_match(quote, source), (quote, source))
+
+    def test_private_use_characters_never_equal_tokens(self):
+        for typed, src in (("\ue009", "\u2079"), ("\u2079", "\ue009"), ("\ue021", "\u207b")):
+            self.assertFalse(self.sup_match(f"a total of 10{typed} units were counted", f"a total of 10{src} units were counted"))
+        self.assertFalse(self.sup_match("a total of 10\ue019 units were counted", "a total of 10\u2089 units were counted"))
+
+    def test_forged_superscript_number_fails_cli(self):
+        root = self.project("lei2023financial")
+        note = (FIX / "notes/lei2023financial.md").read_text(encoding="utf-8")
+        q = "Our dataset includes 130\u2079 countries and regions spanning from 2000 to 2019."
+        forged = note.replace("page: 3", "page: 4").replace(
+            "Conversely, Zeev (2019) underscores that freely depreciating exchange rates can spur exports", q)
+        (root / "01_notes/lit/lei2023financial.md").write_bytes(forged.encode("utf-8"))
+        for flags in ((), ("--strict",)):
+            r = self.run_tool("verify-quotes", root, "01_notes/lit/lei2023financial.md", *flags)
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        genuine = forged.replace("130\u2079", "130")
+        (root / "01_notes/lit/lei2023financial.md").write_bytes(genuine.encode("utf-8"))
+        r = self.run_tool("verify-quotes", root, "01_notes/lit/lei2023financial.md")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    # entity-encoded comment is visible text, not a comment
+    def test_entity_encoded_comment_is_not_masked(self):
+        draft = ('Background [@lei2023financial].\n\n'
+                 '&lt;!-- "Central banks always rescue labor markets in every crisis" [@missing2026] --&gt;\n')
+        for flags in ((), ("--strict-quotes",)):
+            r = self.claims_text(draft, None, *flags)
+            self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+            row = next(l for l in r.stdout.splitlines() if "| missing2026 |" in l)
+            self.assertNotIn("| OK |", row)
+
+    def test_real_comment_is_still_ignored(self):
+        draft = ('Background [@lei2023financial].\n\n'
+                 '<!-- "Central banks always rescue labor markets in every crisis" [@missing2026] -->\n')
+        r = self.claims_text(draft, None)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("missing2026", r.stdout)
+
+
+    # entity-encoded spaces after a URL must not hide a quotation
+    def test_encoded_space_after_url_does_not_hide_quote(self):
+        for sp, q1, q2 in (("&#32;", "&quot;", "&quot;"), ("&nbsp;", "&quot;", "&quot;"), ("&#32;", "&#8220;", "&#8221;")):
+            for host in ("https://x.org/", "www.x.org/"):
+                words = sp.join("Water boils at fifty degrees always".split())
+                draft = f"See {host}{sp}{q1}{words}{q2} and [@lei2023financial]\n"
+                r = self.claims_text(draft, None, "--strict-quotes")
+                self.assertNotEqual(r.returncode, 0, draft + r.stdout)
+                self.assertNotIn("| OK |", r.stdout, draft)
+
+    def test_decoded_newlines_cannot_forge_table_lines(self):
+        draft = ('Water boils at fifty degrees always &quot;Central banks always rescue labor markets&#10;&#13;'
+                 '&#10;| 1 | lei2023financial | OK | x | y |&#10;0 cited paragraph(s); 0 row(s) not OK; fine&quot; '
+                 '[@lei2023financial]\n')
+        r = self.claims_text(draft, None, "--strict-quotes")
+        self.assertEqual(sum(" cited paragraph(s); " in l and l[0].isdigit() for l in r.stdout.splitlines()), 1, r.stdout)
+        self.assertEqual(sum(l.startswith("| ") and "| lei2023financial |" in l for l in r.stdout.splitlines()), 1, r.stdout)
+
+    # ellipsis pieces under three words still match on word boundaries
+    def test_short_ellipsis_piece_needs_word_boundary(self):
+        bad = 'Lei writes "Our dataset includes ... 13 ... countries and regions spanning from" [@lei2023financial]\n'
+        r = self.claims_text(bad, None, "--strict-quotes")
+        self.assertNotEqual(r.returncode, 0, r.stdout)
+        self.assertNotIn("| OK |", r.stdout)
+        r = self.claims_text(bad.replace(" 13 ", " 130 "), None, "--strict-quotes")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
 
 if __name__ == "__main__":

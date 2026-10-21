@@ -41,19 +41,39 @@ NEST = "nested mappings are not supported in note front matter"
 _warned: set = set()
 
 
-SUPSUB = re.compile("[\u2070\u00b9\u00b2\u00b3\u2074-\u2079\u2080-\u2089]+")  # footnote digits glued to words
+# Super/subscript digits and signs become private-use tokens before NFKC (which would fold them to
+# plain characters), so they never vanish and never equal a plain digit or sign. Tokens count as word
+# characters. Private-use characters already present in the text are mapped to U+FFFD first, so none
+# can equal a token.
+SUP = "\u2070\u00b9\u00b2\u00b3\u2074\u2075\u2076\u2077\u2078\u2079"
+SUB = "".join(chr(0x2080 + i) for i in range(10))
+SIGNS = "\u207a\u207b\u207c\u207d\u207e\u208a\u208b\u208c\u208d\u208e"
+MARK = str.maketrans({**{chr(c): "\ufffd" for c in range(0xE000, 0xE030)},
+                      **{c: chr(0xE000 + i) for i, c in enumerate(SUP)},
+                      **{c: chr(0xE010 + i) for i, c in enumerate(SUB)},
+                      **{c: chr(0xE020 + i) for i, c in enumerate(SIGNS)}})
+TOK = "\ue000-\ue02f"
+# footnote marker in a SOURCE: a superscript digit run directly after sentence punctuation or a
+# closing quote and followed by whitespace or the end of the text
+FOOTNOTE = re.compile(r"(?<=[.,;:!?\"'])[\ue000-\ue009]+(?=\s|\Z)")
 CJK = "\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af"
 CJK_RE = re.compile(f"[{CJK}]")
 
 
+def _norm(s: str) -> str:
+    return unicodedata.normalize("NFKC", s.translate(MARK)).translate(TRANS)
+
+
 def _ws(s: str) -> str:
-    return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", SUPSUB.sub("", s)).translate(TRANS)).strip()
+    return re.sub(r"\s+", " ", _norm(s)).strip()  # _norm maps private-use characters: run it once only
 
 
 def variants(s: str) -> set[str]:
-    """Normalised forms: line-break hyphen dropped, or kept as a real hyphen."""
-    s = unicodedata.normalize("NFKC", SUPSUB.sub("", s)).translate(TRANS)
-    return {_ws(re.sub(r"(?<=\w)-[ \t]*\n\s*(?=\w)", repl, s)) for repl in ("", "-")}
+    """Normalised forms of a source page: line-break hyphen dropped, or kept as a real hyphen;
+    each also with footnote markers (see FOOTNOTE) removed."""
+    s = _norm(s)
+    base = {re.sub(r"\s+", " ", re.sub(r"(?<=\w)-[ \t]*\n\s*(?=\w)", repl, s)).strip() for repl in ("", "-")}
+    return base | {FOOTNOTE.sub("", v) for v in base}
 
 
 def find_in(want: str, v: str, pos: int = 0, left: bool = True, right: bool = True, ci: bool = False) -> int:
@@ -61,12 +81,12 @@ def find_in(want: str, v: str, pos: int = 0, left: bool = True, right: bool = Tr
     (hyphen counts as a word character; no boundary next to CJK); -1 if absent."""
     if not want:
         return -1
-    wc = lambda c: c.isalnum() or c in "_-"
+    wc = lambda c: c.isalnum() or c in "_-" or "\ue000" <= c <= "\ue02f"
     first = want[0]
     head = "[" + re.escape(first.lower()) + re.escape(first.upper()) + "]" if ci and first.isalpha() \
         else re.escape(first)
-    pat = (r"(?<![\w-])" if left and wc(first) and not CJK_RE.match(first) else "") + head + re.escape(want[1:]) + \
-          (r"(?![\w-])" if right and wc(want[-1]) and not CJK_RE.match(want[-1]) else "")
+    pat = (rf"(?<![\w{TOK}-])" if left and wc(first) and not CJK_RE.match(first) else "") + head + re.escape(want[1:]) + \
+          (rf"(?![\w{TOK}-])" if right and wc(want[-1]) and not CJK_RE.match(want[-1]) else "")
     m = re.compile(pat).search(v, pos)
     return m.end() if m else -1
 
