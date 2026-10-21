@@ -29,15 +29,26 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "choco install failed with exit code $LASTEXITCODE"
           }
-          $dependencyBins = @((Join-Path $env:ChocolateyInstall 'bin'))
-          foreach ($tool in 'pandoc.exe', 'pdftotext.exe') {
-            $matches = Get-ChildItem (Join-Path $env:ChocolateyInstall 'lib') -Filter $tool -File -Recurse
-            if (-not $matches) {
-              throw "choco install did not provide $tool"
-            }
-            $dependencyBins += $matches.DirectoryName
+          $pandocBins = @(
+            (Join-Path $env:ChocolateyInstall 'bin')
+            (Join-Path $env:ProgramFiles 'Pandoc')
+          ) | Where-Object { Test-Path (Join-Path $_ 'pandoc.exe') }
+          if (-not $pandocBins) {
+            throw 'choco install did not provide pandoc.exe'
           }
+          $popplerBins = Get-ChildItem (Join-Path $env:ChocolateyInstall 'lib\poppler') -Filter 'pdftotext.exe' -File -Recurse |
+            Select-Object -ExpandProperty DirectoryName
+          if (-not $popplerBins) {
+            throw 'choco install did not provide pdftotext.exe'
+          }
+          $dependencyBins = $pandocBins + $popplerBins
           $dependencyBins | Select-Object -Unique | Add-Content -Path $env:GITHUB_PATH
+      - name: Verify native tools (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          pandoc --version
+          pdftotext -v
       - name: Strict plugin validation (claude CLI), else SKILL.md lint
         shell: bash
         run: |
