@@ -4,7 +4,8 @@ research-kit separates two kinds of checking. The command-line tools check text 
 with no model and no network. Everything about meaning is judgment, by a model or by you.
 
 The mechanical claim is narrow: **every quote is matched, on a stated page, against a hashed
-markdown copy of the source.** It does not say the quote is accurate to the original PDF, that
+markdown copy of the source.** (The hash is enforced by `verify-quotes --strict`, or when the
+manifest records it; without either, a missing hash is only a warning.) It does not say the quote is accurate to the original PDF, that
 it supports the claim it is attached to, or that the claim is true.
 
 ## Mechanical checks
@@ -13,10 +14,11 @@ it supports the claim it is attached to, or that the claim is true.
 
 For each note it checks:
 
-- **Quote text.** A quote needs at least 5 words (15 characters for text without spaces, such as
-  CJK). It must occur on the page the note pins it to, on word boundaries, in the source markdown
+- **Quote text.** A quote needs at least 5 words (15 characters for a quote containing CJK
+  characters). It must occur on the page the note pins it to, on word boundaries, in the source markdown
   (`02_sources/md/<citekey>.md`, with `<!-- page N -->` markers). Matching normalises Unicode
-  (NFKC), whitespace, line-break hyphenation and typographic quotes and dashes, nothing more.
+  (NFKC), whitespace, line-break hyphenation, typographic quotes and dashes, soft hyphens and
+  non-breaking spaces, and drops footnote superscript digits; nothing more.
   A quote found only on another page fails ("text found on a different page").
 - **Hashed source.** When the source md records `md_sha256` (written by `pdf2md`), the body is
   re-hashed; an edit after conversion fails. `--strict` requires the hash, and when
@@ -88,5 +90,6 @@ copies", and a model's reading of what they mean still needs your review.
   symlinked `02_sources/` or `02_sources/md` still works. Do not nest a project under a folder
   named `01_notes`.
 - **The md is a conversion, not the PDF.** Page pins are only as good as the converter's page
-  markers. Docling emits one block marked page 1, so recheck page pins against the PDF.
+  markers. `pdf2md` refuses `--engine docling` because it has no per-page output; if you convert
+  a source some other way, check its page markers against the PDF.
 - **Draft-quote checks are heuristic** and advisory by default (see above).
