@@ -55,7 +55,7 @@ MARK = str.maketrans({**{chr(c): "\ufffd" for c in range(0xE000, 0xE030)},
 TOK = "\ue000-\ue02f"
 # footnote marker in a SOURCE: a superscript digit run directly after sentence punctuation or a
 # closing quote and followed by whitespace or the end of the text
-FOOTNOTE = re.compile(r"(?<=[.,;:!?\"'])[\ue000-\ue009]+(?=\s|\Z)")
+FOOTNOTE = re.compile(r"(?<=[.,;:?\"])[\ue000-\ue009]+(?=\s|\Z)")
 CJK = "\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af"
 CJK_RE = re.compile(f"[{CJK}]")
 
