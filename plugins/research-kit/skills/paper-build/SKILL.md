@@ -3,7 +3,7 @@ name: paper-build
 description: Build the paper from 10_paper/paper.md with pandoc citations to PDF or HTML, and check the bibliography. Use when the user wants to compile, cite-check or tidy the .bib of a research paper project.
 ---
 
-Requires: Python 3.9+; pandoc (xelatex optional, for PDF; without it the build produces HTML).
+Requires: Python 3.9+; pandoc (Typst or XeLaTeX optional for PDF).
 
 # Paper build
 
@@ -24,13 +24,14 @@ bundled: pandoc's default citation style is used; drop a `.csl` into `10_paper/`
 2. Build:
 
    ```
-   build-paper
+    python3 "/absolute/path/to/plugins/research-kit/bin/build-paper" --to pdf
    ```
 
-   If not on PATH, run it from the kit's plugins/research-kit/bin/. It logs tool versions, runs
-   `pandoc --citeproc` and writes `10_paper/paper.pdf` (or `.html`). The compile guard fails on
-   literal `???`, unresolved citations and missing image/include files. `--soft` downgrades
-   failures to warnings (exit 0) for hooks.
+    Use an absolute, quoted path (PowerShell: `python` or `py -3`). It logs tool versions,
+    runs `pandoc --citeproc`, and writes the requested PDF, HTML or DOCX without a mislabeled fallback.
+    PDF prefers Typst then XeLaTeX, otherwise it explicitly writes HTML. The compile guard fails on
+    literal `???`, unresolved citations and missing image/include files. `--grounding` opt-in runs
+    local quote/claim checks but is not proof of the full draft; `--soft` downgrades failures for hooks.
 3. Fix each reported problem at its source; never silence the guard.
 
 Bib discipline: one `.bib` per project, ideally exported by the reference manager. Verify author,

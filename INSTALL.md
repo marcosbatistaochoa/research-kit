@@ -60,9 +60,9 @@ Analysis needs `pipeline-runner`; running project code is a separate trust decis
 
 ## Selective tools and templates
 
-Python helpers can run with `python3` and an absolute file path, without PATH or
-executable permissions. For direct execution, retain/set executable permission
-with `chmod +x` on each selected tool. Invoke `build-paper` using `sh`, never Python.
+Python helpers, including `build-paper`, run with `python3` and an absolute file
+path, without PATH or executable permissions. On Windows PowerShell use `python`
+(or `py -3`) and a quoted absolute path.
 
 Most helpers can be copied alone, except that `check-claims` needs `verify-quotes` in the same folder. **The two scaffold tools cannot:** retain this
 layout wherever you put them, selecting only the needed template subtree:
@@ -91,7 +91,7 @@ python3 "$KIT/bin/pdf2md" 02_sources/pdf/*.pdf --out 02_sources/md/
 python3 "$KIT/bin/verify-quotes" 01_notes/lit/*.md
 python3 "$KIT/bin/check-claims" 10_paper/paper.md
 python3 "$KIT/bin/check-bib"
-sh "$KIT/bin/build-paper"
+python3 "$KIT/bin/build-paper" --to pdf
 ```
 
 Each line is an independent stage; run only what you selected. Search writes
@@ -113,18 +113,38 @@ not a replacement for instructions in an existing one.
 
 ## Platform and dependency checklist
 
-Python 3.9+ covers the seven helpers. `pdf2md` additionally needs `pdftotext`
+Python 3.9+ covers the eight helpers. `pdf2md` additionally needs `pdftotext`
 from Poppler; optional `ocrmypdf` handles scans and `qpdf` encrypted PDFs. Docling was removed in 0.1.3: `pdf2md --engine docling` is refused
 because its output is one block marked page 1, which breaks page pinning. Search uses OpenAlex, Semantic Scholar and doi.org.
 Set an optional `SEMANTIC_SCHOLAR_API_KEY` in the process environment, never
 in tracked files; without a key Semantic Scholar often returns 429/403.
 Inspect receipts for partial provider coverage. `LIT_SEARCH_MAILTO` is optional.
 
-`build-paper` needs POSIX `sh` and pandoc on PATH; XeLaTeX enables PDF output,
-otherwise HTML is built. On Windows, Python helpers can be invoked with your
-Python launcher and explicit paths; use Git Bash or WSL for the shell build
-and POSIX command examples. Standalone UTF-8 tests are not a full Windows
-workflow certification. R and any analysis packages belong to the chosen
+`build-paper` needs Python 3.9+ and pandoc on PATH. It prefers Typst then XeLaTeX
+for PDF, and explicitly writes HTML if neither engine exists; use `--to html` or
+`--to docx` to select a format. On Windows PowerShell, for example:
+
+```powershell
+$researchKit = (Resolve-Path .\plugins\research-kit)
+python "$researchKit\bin\verify-quotes" --strict 01_notes/lit/lei2023financial.md
+python "$researchKit\bin\build-paper" --to html
+```
+
+### Codex adapter
+
+Install one self-contained Codex skill into an existing project; it does not alter
+`AGENTS.md`, global configuration, or the Claude plugin:
+
+```sh
+python3 scripts/install-codex.py --project /absolute/path/to/project
+```
+
+```powershell
+python .\scripts\install-codex.py --project C:\path\to\project
+```
+
+The installed skill is `.agents/skills/research-kit/`. Set `$researchKit` to that
+path when prompting Codex to run a clean quote demo. R and any analysis packages belong to the chosen
 pipeline environment; `uv` and `renv` are optional environment-management tools.
 
 Try the [offline quote check](README.md) before adding network or build

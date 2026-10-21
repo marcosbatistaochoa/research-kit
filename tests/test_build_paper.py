@@ -12,7 +12,6 @@ TEMPLATE = ROOT / "plugins/research-kit/templates/project"
 BIB = "@article{a2020x, author={Doe, Jane}, title={Title}, journal={J}, year={2020}}\n"
 
 
-@unittest.skipIf(sys.platform == "win32", "build-paper is a POSIX sh script")
 @unittest.skipUnless(shutil.which("pandoc"), "pandoc not installed")
 class BuildPaper(unittest.TestCase):
     def project(self, paper):
@@ -26,10 +25,19 @@ class BuildPaper(unittest.TestCase):
         return root
 
     def build(self, root, *args):
-        return subprocess.run(["sh", str(TOOL), *args], cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        return subprocess.run(
+            [sys.executable, str(TOOL), *args],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
 
     def out(self, root):
-        return list((root / "10_paper").glob("paper.pdf")) + list((root / "10_paper").glob("paper.html"))
+        return list((root / "10_paper").glob("paper.pdf")) + list(
+            (root / "10_paper").glob("paper.html")
+        )
 
     def test_good_build(self):
         root = self.project("# Intro\n\nAs shown by @a2020x.\n")
@@ -56,6 +64,13 @@ class BuildPaper(unittest.TestCase):
         root = self.project("# Intro\n\n![fig](../05_figures/nope.png)\n")
         self.assertEqual(self.build(root).returncode, 1)
         self.assertEqual(self.build(root, "--soft").returncode, 0)
+
+    def test_requested_html_and_docx_are_not_mislabeled(self):
+        root = self.project("# Intro\n\nAs shown by @a2020x.\n")
+        self.assertEqual(self.build(root, "--to", "html").returncode, 0)
+        self.assertTrue((root / "10_paper/paper.html").is_file())
+        self.assertEqual(self.build(root, "--to", "docx").returncode, 0)
+        self.assertTrue((root / "10_paper/paper.docx").is_file())
 
 
 if __name__ == "__main__":

@@ -27,29 +27,29 @@ role itself does not edit code. Only execute trusted project code.
 
 ## Optional native skill discovery
 
-These are documented discovery paths, not tested integrations of this collection:
+Codex installation is tested as a local adapter; live Codex discovery has not been
+tested. These are documented discovery paths:
 
 | Assistant | Documented path | Source and evidence scope |
 |---|---|---|
 | OpenCode | Project `.opencode/skills/<name>/SKILL.md`; documented `.claude/skills/` and `.agents/skills/` equivalents also exist | [Official skills documentation](https://opencode.ai/docs/skills/) |
-| Codex | `.agents/skills/`; scans from the current directory up to the repository root | [Official skills documentation](https://developers.openai.com/codex/skills/) (redirected to the current build-skills documentation during preparation) |
+| Codex | `.agents/skills/<name>/SKILL.md`; repository guidance is read from `AGENTS.md` from root to cwd | [Official skills documentation](https://developers.openai.com/codex/skills/) |
 
 The preparation review observed these official sources on **2026-10-14**.
 This document records those supplied observations; this documentation pass did
 not independently retrieve the pages or test native discovery. Recheck current
 documentation before relying on a path in a different version.
 
-Copy the **whole chosen skill folder**, including assets such as
-`literature-notes/template.md`, to the selected supported discovery directory.
-Discovery makes instructions available; it does not install bare-name helper
-commands, support templates or role implementations. Review each skill's Claude
-delegation steps and adapt them explicitly before execution.
+For Codex, use `python3 scripts/install-codex.py --project <project-dir>` (or
+`python .\scripts\install-codex.py --project <project-dir>` in PowerShell). It
+copies a self-contained `.agents/skills/research-kit/` with helpers, templates,
+workflow assets and role contracts. It neither creates nor overwrites `AGENTS.md`.
+Discovery makes instructions available; it does not import Claude permissions.
 
 ## Dependencies survive adaptation
 
-- Skills invoke helpers by bare name. Make the kit's `bin/` available on PATH
-  to the assistant's shell, or supply absolute paths and use `python3` for Python
-  helpers / `sh` for `build-paper`. Do not assume the plugin cache is on PATH.
+- Use absolute, quoted helper paths and `python3` on macOS/Linux or `python`/`py -3`
+  in PowerShell. Do not assume the plugin cache is on PATH.
 - `new-project` and `new-pipeline` need `templates/` as a **sibling of `bin/`**.
   Moving only a script breaks its template lookup.
 - Notes require the local note template, `source-reader` contract and
@@ -59,6 +59,5 @@ delegation steps and adapt them explicitly before execution.
   imported. Configure equivalent capabilities in the host assistant according to
   its documentation; otherwise use the contracts manually and disclose the gap.
 
-The [install guide](../INSTALL.md) gives tool/dependency details. No native
-non-Claude compatibility, full Windows support or performance result follows
-from these path observations.
+The [install guide](../INSTALL.md) gives tool/dependency details. CI exercises
+macOS, Linux and Windows helper paths; it does not provide live Codex evidence.

@@ -9,9 +9,9 @@
 <picture><source media="(prefers-color-scheme: dark)" srcset="assets/transcript-dark.svg"><img src="assets/transcript-light.svg" alt="Terminal transcript: verify-quotes passes 14 real quotations and rejects a planted fabrication" width="100%"></picture>
 
 Early-stage plugin **0.1.3**: 7 skills, 4 agent roles, 8 command-line tools and
-project, Python and R templates. Install the whole Claude Code plugin or take the
-parts you need. The skills and roles are Markdown instructions; the helpers are
-seven Python programs and one POSIX shell script. Reading a skill does not execute a tool.
+project, Python and R templates. Install the Claude Code plugin, or the documented
+Codex adapter into one project. The skills and roles are Markdown instructions; the
+helpers are eight Python programs. Reading a skill does not execute a tool.
 
 ## Install
 
@@ -23,6 +23,12 @@ seven Python programs and one POSIX shell script. Reading a skill does not execu
 Then ask Claude to start a research project, search the literature, or verify notes.
 Command-line dependencies still need to be available; see [INSTALL.md](INSTALL.md)
 for tool paths, selective installation and existing-settings precautions.
+
+For Codex, from this checkout run `python3 scripts/install-codex.py --project
+/absolute/path/to/project` (PowerShell: `python .\scripts\install-codex.py --project
+C:\path\to\project`). This copies one local skill to
+`.agents/skills/research-kit/`; it is an adapter with tested installation and local
+helpers, not evidence of live Codex discovery or imported Claude permissions.
 
 ## What you get
 
@@ -44,7 +50,7 @@ for tool paths, selective installation and existing-settings precautions.
 | Tool | [pdf2md](plugins/research-kit/bin/pdf2md) | PDF to Markdown with page markers |
 | Tool | [check-claims](plugins/research-kit/bin/check-claims) | Check each cited note (runs `verify-quotes` on it) and flag uncited or unverified claims; does not judge meaning |
 | Tool | [check-bib](plugins/research-kit/bin/check-bib) | Check bibliography structure and citation coverage |
-| Tool | [build-paper](plugins/research-kit/bin/build-paper) | Build the paper with pandoc (POSIX shell) |
+| Tool | [build-paper](plugins/research-kit/bin/build-paper) | Build PDF, HTML or DOCX with pandoc |
 | Tool | [new-project](plugins/research-kit/bin/new-project) | Scaffold a research project |
 | Tool | [new-pipeline](plugins/research-kit/bin/new-pipeline) | Scaffold an R or Python pipeline |
 
@@ -97,9 +103,9 @@ flowchart LR
 - PDF conversion needs Poppler's `pdftotext`; scans may need `ocrmypdf`, encrypted
   files `qpdf`. `pdf2md` refuses `--engine docling` (removed in 0.1.3: its output is one
   block marked page 1, which breaks page pinning). Recheck page pins against the PDF.
-- Paper builds need POSIX `sh` and pandoc; XeLaTeX enables PDF output, otherwise
-  the tool builds HTML. On Windows, use Git Bash or WSL for `build-paper`.
-  UTF-8 Python tests do not establish whole-workflow Windows support.
+- Paper builds need Python 3.9+ and pandoc; PDF prefers Typst then XeLaTeX, and
+  falls back explicitly to HTML if neither exists. Windows invocation is supported
+  through `python`/`py -3`; CI covers helpers, not a live Codex session.
 - R pipelines need R; Python pipelines can use `uv`. Running a pipeline executes
   project code with your permissions. Model steps also depend on your assistant's
   access and may incur its usual costs. No native non-Claude integration or
