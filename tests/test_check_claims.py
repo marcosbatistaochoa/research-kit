@@ -31,8 +31,8 @@ class CheckClaims(unittest.TestCase):
                 if "source_md: none" not in body:
                     (root / f"02_sources/md/{k}.md").write_text(SOURCE.format(k=k), encoding="utf-8")
             (root / "10_draft.md").write_text(draft, encoding="utf-8")
-            return subprocess.run([sys.executable, str(TOOL), *flags, str(root / "10_draft.md")],
-                                  capture_output=True, text=True, encoding="utf-8", errors="replace")
+            return subprocess.run([sys.executable, str(TOOL), *flags, "--root", str(root), str(root / "10_draft.md")],
+                                  cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace")
 
     def row(self, r, key):
         return next(l for l in r.stdout.splitlines() if f"| {key} |" in l)

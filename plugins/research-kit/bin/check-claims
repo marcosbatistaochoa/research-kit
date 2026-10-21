@@ -148,8 +148,9 @@ def blocks(text: str) -> list[list[Seg]]:
                 start = i
             buf.append(i - 1)
         elif buf:
-            segs.append(Seg(start, [lines[j].strip() for j in buf],
-                            [orig[j] if j < len(orig) else "" for j in buf], markers.get(start)))
+            # entities are decoded only after masking, so an encoded `&lt;!--` is never a comment
+            segs.append(Seg(start, [html.unescape(lines[j].strip()) for j in buf],
+                            [html.unescape(orig[j]) if j < len(orig) else "" for j in buf], markers.get(start)))
             buf = []
     # footnote definitions belong to the paragraphs that reference them
     defs, plain = {}, []
@@ -301,7 +302,7 @@ def main(argv: list[str]) -> int:
         return 2
     draft = Path(args[0])
     try:
-        text = html.unescape(draft.read_bytes().decode("utf-8-sig"))
+        text = draft.read_bytes().decode("utf-8-sig")
         vq = load_vq()
     except UnicodeDecodeError:
         print("check-claims: draft is not valid UTF-8", file=sys.stderr)

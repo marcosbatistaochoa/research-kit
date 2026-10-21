@@ -21,10 +21,19 @@ for f in skills:
         errors.append(f"{rel}: no YAML front matter")
         continue
     meta = {}
-    for line in m.group(1).splitlines():
+    lines = m.group(1).splitlines()
+    for i, line in enumerate(lines):
         k, sep, v = line.partition(":")
         if sep and not line.startswith((" ", "\t", "#")):
-            meta[k.strip()] = v.strip().strip("'\"")
+            v = v.strip()
+            if re.fullmatch(r"[>|][+-]?\d*\s*(#.*)?", v):  # block scalar: value is its indented body
+                body = []
+                for nxt in lines[i + 1:]:
+                    if nxt.strip() and not nxt.startswith((" ", "\t")):
+                        break
+                    body.append(nxt.strip())
+                v = " ".join(b for b in body if b)
+            meta[k.strip()] = v.strip("'\"")
     if not meta.get("name"):
         errors.append(f"{rel}: empty or missing name")
     elif meta["name"] != f.parent.name:
