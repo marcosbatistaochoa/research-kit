@@ -1,13 +1,11 @@
 # Changelog
 
-## 0.1.2
+## 0.1.3
 
-- Cosmetic release, no behaviour change. Terminal-transcript images now wrap at
-  word boundaries (`tools/banner/bin/make-banner`), the licensing map covers the
-  banner fonts, and a duplicated sentence is gone from the README.
-
-## Unreleased
-
+- New `docs/verification.md` states what is checked mechanically and what stays model judgment, with the known limits; linked from the README.
+- README: dropped overclaiming wording; verification is described as page-pinned matching against a hashed markdown copy of the source.
+- CI and `make check` lint every `SKILL.md` (`scripts/lint-skills.py`: front matter, name = folder, existing paths); CI runs `claude plugin validate --strict` when the CLI is present.
+- `tools/banner/fonts/OFL.txt` now says the fonts ship as WOFF2. Plugin version bumped to 0.1.3.
 - `check-claims`: the notes folder is never chosen by position. New `--root <project>` names the project
   (notes = `<project>/01_notes/lit`). Without it, every `01_notes/lit` found in the draft's ancestors (lexical and
   physical path) and the current directory is a candidate; exactly one is used, none means "no notes", and more
@@ -38,6 +36,12 @@
   Docling pagination and the limits of Windows test evidence.
 - Correct the README's stale version reference to existing plugin version 0.1.1.
   These documentation changes do not constitute a new version or live install.
+
+## 0.1.2
+
+- Cosmetic release, no behaviour change. Terminal-transcript images now wrap at
+  word boundaries (`tools/banner/bin/make-banner`), the licensing map covers the
+  banner fonts, and a duplicated sentence is gone from the README.
 
 ## 0.1.1
 
