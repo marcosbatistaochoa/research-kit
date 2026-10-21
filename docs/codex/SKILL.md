@@ -20,6 +20,11 @@ available). The copied workflows in `workflows/` and role contracts in `agents/`
 are instructions, not imported permissions. If independent roles are unavailable,
 run their steps serially and label the result non-independent.
 
+During setup and on any operational failure, read and follow
+`templates/agent-recovery.md` relative to this installed skill directory. It
+allows at most two environment-only repair attempts using existing permissions,
+then requires an exact-error report. Research mismatches are not repair targets.
+
 Useful local checks:
 
 ```text

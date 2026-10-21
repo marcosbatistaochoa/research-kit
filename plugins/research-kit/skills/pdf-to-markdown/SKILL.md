@@ -16,6 +16,10 @@ pdf2md 02_sources/pdf/*.pdf --out 02_sources/md/
 
 If `pdf2md` is not on PATH, run it from the kit's `plugins/research-kit/bin/`.
 
+On operational failure, follow `../../templates/agent-recovery.md` relative to
+this skill directory. Limit recovery to two environment-only attempts; never
+edit source text, hashes or verification thresholds to obtain a pass.
+
 What it does per PDF:
 
 1. Runs `pdftotext` in reading order (`--layout` opts into `-layout`, which can interleave columns). If the mean characters per page is under the threshold
@@ -31,7 +35,8 @@ What it does per PDF:
 
 An existing conversion is never overwritten; pass `--force` to redo it. If a needed program
 (`pdftotext`, `ocrmypdf`, `qpdf`) is missing the tool says which one and moves on to the
-next file; tell the user how to install it rather than working around it.
+next file; follow the recovery guide for a permitted installation, then rerun
+the exact failed command and account for every skipped file.
 
 When to read the markdown: for summaries, notes, search, and quote checking. Go back to the
 PDF only for figures, tables that came out garbled, or when `method` shows `ocr` and a

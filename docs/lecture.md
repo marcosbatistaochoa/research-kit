@@ -89,3 +89,12 @@ It copies the local adapter to `.agents/skills/research-kit/` in that project.
 The installer is idempotent only when the installed files are identical; it
 refuses a differing destination. This installation does not establish live
 Codex discovery or permissions.
+
+## When setup or a command fails
+
+Ask your agent to follow the packaged
+[environment recovery guide](../plugins/research-kit/templates/agent-recovery.md).
+The Codex adapter and relevant Claude skills point to it during setup or runtime
+failures. It permits two environment-only attempts, reruns the failed command,
+and stops with an exact-error report if unresolved. It cannot guarantee automatic
+repair and never changes research evidence or source/page mappings to pass a check.

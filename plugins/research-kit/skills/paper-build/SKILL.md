@@ -7,6 +7,11 @@ Requires: Python 3.9+; pandoc (Typst or XeLaTeX optional for PDF).
 
 # Paper build
 
+On operational failure, follow `../../templates/agent-recovery.md` relative to
+this skill directory: at most two environment-only attempts within existing
+permissions, then report. Quote, citation and source failures require human
+research decisions; never weaken the guard or rewrite evidence as recovery.
+
 Layout: `10_paper/paper.md` (abstract, introduction, literature, data, method, results, discussion,
 conclusion), `10_paper/metadata.yaml` (title, author, date, bibliography path). No CSL file is
 bundled: pandoc's default citation style is used; drop a `.csl` into `10_paper/` and add `csl:` to
