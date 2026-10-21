@@ -74,9 +74,13 @@ def load_vq():
     return mod
 
 
+class NoteProbeError(Exception):
+    pass
+
+
 def note_candidates(draft: Path) -> dict[Path, Path]:
     """Every distinct (resolved) <B>/01_notes/lit directory for B in the draft's ancestors, taken lexically
-    (unresolved) and physically (realpath), and the current directory taken both ways. No ordering is
+    (unresolved) and physically (realpath), and the current directory and ITS ancestors taken both ways. No ordering is
     applied: the caller accepts exactly one, so no planted folder can win by position."""
     cwd = Path(os.getcwd())
     pwd = os.environ.get("PWD")
@@ -85,12 +89,16 @@ def note_candidates(draft: Path) -> dict[Path, Path]:
         cwds.append(Path(pwd))  # the shell's (possibly symlinked) view of the cwd
     here = [Path(os.path.abspath(c / draft)).parent for c in cwds]  # relative drafts: both views of the cwd
     here += [Path(os.path.realpath(draft)).parent, Path(os.path.realpath(here[0]))]
-    bases = [b for h in here for b in (h, *h.parents)] + cwds
+    cwds.append(Path(os.path.realpath(cwd)))
+    bases = [b for h in (*here, *cwds) for b in (h, *h.parents)]  # draft and cwd, each with all ancestors
     found: dict[Path, Path] = {}  # resolved -> first (unresolved) path, which is what verify-quotes must see
     for b in bases:
         lit = b / "01_notes/lit"
-        if lit.is_dir():
-            found.setdefault(lit.resolve(), lit)
+        try:
+            if lit.is_dir():
+                found.setdefault(lit.resolve(), lit)
+        except OSError as e:
+            raise NoteProbeError(f"cannot inspect {lit}: {e}") from e
     return found
 
 
@@ -307,7 +315,11 @@ def main(argv: list[str]) -> int:
             print(f"check-claims: --root {root_arg}: {notes} is not a directory", file=sys.stderr)
             return 2
     else:
-        cands = note_candidates(draft)
+        try:
+            cands = note_candidates(draft)
+        except NoteProbeError as e:
+            print(f"check-claims: {e} -- pass --root <project>", file=sys.stderr)
+            return 2
         if len(cands) > 1:
             print("check-claims: ambiguous notes folder: " + ", ".join(str(c) for c in cands)
                   + " -- pass --root <project>", file=sys.stderr)

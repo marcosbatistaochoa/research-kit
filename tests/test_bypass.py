@@ -23,9 +23,21 @@ SRC_MD = ROOT / "examples/basic/02_sources/md/lei2023financial.md"
 
 
 class Bypass(unittest.TestCase):
+    def setUp(self):
+        # every temp dir of a test lives under this one fresh parent, never directly in the shared temp dir
+        self.base = Path(tempfile.mkdtemp(prefix="bypass-"))
+        self.addCleanup(shutil.rmtree, self.base, True)
+        # the tool scans all ancestors, so a stray notes folder above the parent would change results: say so
+        for a in self.base.parents:
+            if (a / "01_notes/lit").exists():
+                self.fail(f"environment has a stray {a / '01_notes/lit'}; remove it before running this suite")
+
+    def mk(self):
+        return Path(tempfile.mkdtemp(dir=self.base))
+
     def project(self, note=None, draft=None, key=None, parent=None):
         """Temp project with Lei's source md, one fixture note (saved as <key>.md) and a draft."""
-        t = tempfile.TemporaryDirectory(dir=parent)
+        t = tempfile.TemporaryDirectory(dir=parent or self.base)
         self.addCleanup(t.cleanup)
         root = Path(t.name)
         (root / "02_sources/md").mkdir(parents=True)
@@ -304,7 +316,7 @@ class Bypass(unittest.TestCase):
 
     def test_symlinked_note_cannot_pick_attacker_root(self):
         root = self.project("lei2023financial")
-        evil = Path(tempfile.mkdtemp())
+        evil = Path(self.mk())
         self.addCleanup(shutil.rmtree, evil, True)
         (evil / "02_sources/md").mkdir(parents=True)
         (evil / "01_notes/lit").mkdir(parents=True)
@@ -328,7 +340,7 @@ class Bypass(unittest.TestCase):
 
     def test_control_project_reached_through_symlink(self):
         root = self.project("lei2023financial", "genuine")
-        link = Path(tempfile.mkdtemp()) / "link"
+        link = Path(self.mk()) / "link"
         self.addCleanup(shutil.rmtree, link.parent, True)
         link.symlink_to(root, target_is_directory=True)
         r = self.run_tool("verify-quotes", link, "01_notes/lit/lei2023financial.md", "--strict")
@@ -449,7 +461,7 @@ class Bypass(unittest.TestCase):
     def test_control_symlinked_sources_dir(self):
         for sub in ("02_sources", "02_sources/md"):
             root = self.project("lei2023financial", "genuine")
-            ext = Path(tempfile.mkdtemp())
+            ext = Path(self.mk())
             self.addCleanup(shutil.rmtree, ext, True)
             target = root / sub
             shutil.move(str(target), str(ext / "store"))
@@ -470,7 +482,7 @@ class Bypass(unittest.TestCase):
     # notes folder: exactly one candidate, or fail (no ordering among candidates)
     def planted_parent(self):
         """(sandbox S holding a forged pair + note, genuine project P inside S, draft quoting the forgery)."""
-        sandbox = Path(tempfile.mkdtemp())
+        sandbox = Path(self.mk())
         self.addCleanup(shutil.rmtree, sandbox, True)
         self.forged_pair(sandbox)
         (sandbox / "01_notes/lit").mkdir(parents=True, exist_ok=True)
@@ -495,7 +507,7 @@ class Bypass(unittest.TestCase):
         self.assertIn(f"notes: {root / '01_notes/lit'}", r.stderr)
 
     def test_stray_empty_parent_notes_folder_is_ambiguous_not_silent(self):
-        sandbox = Path(tempfile.mkdtemp())
+        sandbox = Path(self.mk())
         self.addCleanup(shutil.rmtree, sandbox, True)
         (sandbox / "01_notes/lit").mkdir(parents=True)
         root = self.project("lei2023financial", "genuine", parent=sandbox)
@@ -506,7 +518,7 @@ class Bypass(unittest.TestCase):
 
     def test_external_draft_with_own_notes_is_ambiguous(self):
         root = self.project("lei2023financial")
-        ext = Path(tempfile.mkdtemp())
+        ext = Path(self.mk())
         self.addCleanup(shutil.rmtree, ext, True)
         self.forged_pair(ext / "collab")
         (ext / "collab/01_notes/lit").mkdir(parents=True)
@@ -522,7 +534,7 @@ class Bypass(unittest.TestCase):
 
     def test_symlinked_paper_dir_with_pair_never_ok(self):
         root = self.project("lei2023financial")
-        ext = Path(tempfile.mkdtemp())
+        ext = Path(self.mk())
         self.addCleanup(shutil.rmtree, ext, True)
         self.forged_pair(ext)
         (ext / "01_notes/lit").mkdir(parents=True)
@@ -534,6 +546,44 @@ class Bypass(unittest.TestCase):
         r = self.run_tool("check-claims", root / "10_paper", "ch.md", "--strict-quotes")
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertNotIn("| OK |", r.stdout)
+
+    def external_forged_draft(self):
+        """(genuine project P, draft X/ch.md in an external folder shipping a forged pair + note)."""
+        root = self.project("lei2023financial")
+        (root / "10_paper").mkdir()
+        ext = self.mk()
+        self.forged_pair(ext)
+        (ext / "01_notes/lit").mkdir(parents=True)
+        note = (FIX / "notes/lei2023financial.md").read_text(encoding="utf-8").replace(
+            "Conversely, Zeev (2019) underscores that freely depreciating exchange rates can spur exports", self.F)
+        (ext / "01_notes/lit/lei2023financial.md").write_text(note, encoding="utf-8")
+        draft = ext / "ch.md"
+        draft.write_text(f'Lei writes "{self.F}" [@lei2023financial].\n', encoding="utf-8")
+        return root, draft
+
+    def test_external_draft_cwd_inside_project_is_ambiguous(self):
+        root, draft = self.external_forged_draft()
+        for cwd in (root / "10_paper", root / "01_notes/lit"):
+            r = self.run_tool("check-claims", cwd, str(draft), "--strict-quotes")
+            self.assertEqual(r.returncode, 2, f"{cwd}: {r.stdout}{r.stderr}")
+            self.assertIn("ambiguous notes folder", r.stderr)
+        r = self.run_tool("check-claims", root / "10_paper", str(draft), "--strict-quotes", "--root", str(root))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+    def test_unreadable_planted_notes_folder_exits_2(self):
+        if os.geteuid() == 0:
+            self.skipTest("root ignores file modes")
+        sandbox = self.mk()
+        (sandbox / "01_notes").mkdir()
+        root = self.project("lei2023financial", "genuine", parent=sandbox)
+        (sandbox / "01_notes").chmod(0)
+        self.addCleanup((sandbox / "01_notes").chmod, 0o755)
+        r = self.run_tool("check-claims", root, "draft.md")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("cannot inspect", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        r = self.run_tool("check-claims", root, "draft.md", "--root", str(root))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
     def test_root_must_hold_notes(self):
         root = self.project("lei2023financial", "genuine")

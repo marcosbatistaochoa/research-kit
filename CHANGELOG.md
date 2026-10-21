@@ -13,6 +13,9 @@
   physical path) and the current directory is a candidate; exactly one is used, none means "no notes", and more
   than one stops the run with exit 2 ("ambiguous notes folder ... pass --root <project>"). An enclosing project,
   or a stray `/tmp/01_notes/lit`, therefore makes check-claims ask for `--root` instead of trusting either folder.
+  The current directory's ancestors count as candidates too, and a candidate that cannot be inspected
+  (permissions) stops the run with exit 2. For a draft from someone else, or when running from a script,
+  always pass `--root <your project>`; check the `notes:` stderr line otherwise.
   The notes folder used is printed to stderr (`notes: <path>`). `verify-quotes` rejects a note whose real path
   leads to a different project than its given path, and therefore a symlinked `01_notes/lit`
   (behaviour change: keep notes in real folders). Do not nest a project under a folder named `01_notes`.

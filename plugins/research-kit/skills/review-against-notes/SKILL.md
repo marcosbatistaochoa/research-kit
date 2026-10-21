@@ -19,11 +19,14 @@ Order matters: mechanical checks first, model judgment second, adversary last. R
 2. Map citations to notes:
 
    ```
-   check-claims [--strict-quotes] [--root <project>] <draft.md>
+   check-claims [--strict-quotes] --root <project> <draft.md>
    ```
 
-   It finds the project's `01_notes/lit` itself; if it reports an ambiguous notes folder (another
-   `01_notes/lit` above the project or next to the draft), pass `--root <project>`.
+   Always pass `--root <your project>` (the folder that holds `01_notes/` and `02_sources/`) when you know it:
+   for a draft from someone else, or when running from a script, a folder the draft ships with would otherwise
+   be trusted. Without `--root` it looks for `01_notes/lit` in the draft's and the current directory's ancestors;
+   more than one, or an unreadable folder, stops the run with exit 2. It prints `notes: <folder>` on stderr:
+   check that this is your project's notes folder.
 
    If not on PATH, run it from the kit's plugins/research-kit/bin/. It prints a markdown table:
    OK, NO-SOURCE, UNSOURCED, UNCITED, or UNVERIFIED with the reason (no note, a note without quotes, a quote that fails
