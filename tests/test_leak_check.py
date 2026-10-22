@@ -78,7 +78,7 @@ class FindBash(unittest.TestCase):
                     side_effect=lambda name: str(executable) if name == "git" else None,
                 ),
             ):
-                self.assertEqual(_find_bash(is_windows=True), str(bash))
+                self.assertEqual(_find_bash(is_windows=True), str(bash.resolve()))
 
     def test_windows_standard_git_layout_finds_bin_bash(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -93,7 +93,7 @@ class FindBash(unittest.TestCase):
                 __name__ + ".shutil.which",
                 side_effect=lambda name: str(executable) if name == "git" else None,
             ):
-                self.assertEqual(_find_bash(is_windows=True), str(bash))
+                self.assertEqual(_find_bash(is_windows=True), str(bash.resolve()))
 
     def test_windows_system_bash_without_git_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -225,6 +225,22 @@ class LeakCheck(unittest.TestCase):
 
     def test_denylist_case_insensitive(self):
         self.assertEqual(self.run_check("about SECRETPROJECT today").returncode, 1)
+
+    def test_denylist_path_preserves_spaces_and_backslashes(self):
+        # Windows supplies native separators; POSIX can exercise literal escapes.
+        directory = (
+            "paths with spaces" if os.name == "nt" else r"paths with spaces\temp\Users"
+        )
+        self.deny = Path(self.tmp.name) / directory / "denylist"
+        self.deny.parent.mkdir()
+        self.deny.write_text("SecretProject\n", encoding="utf-8")
+        for mode in ("--staged", "--tree", "--history"):
+            with self.subTest(mode=mode):
+                if mode == "--history":
+                    self.git("commit", "-qm", "fixture")
+                result = self.run_check("about SECRETPROJECT today", mode)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("f.txt:1: [denylist] term #1", result.stdout)
 
     def test_noreply_ok(self):
         r = self.run_check("12345+u@users.noreply.github.com and noreply@example.org")

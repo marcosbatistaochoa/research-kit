@@ -218,7 +218,7 @@ class Doctor(unittest.TestCase):
         result = subprocess.run(
             [sys.executable, str(TOOL), "--workflow", "pdf", "--json"],
             cwd=self.project,
-            env={**os.environ, "PATH": str(self.project)},
+            env={**os.environ, "PATH": str(self.project), "PYTHONIOENCODING": "utf-8"},
             capture_output=True,
             text=True,
             timeout=10,

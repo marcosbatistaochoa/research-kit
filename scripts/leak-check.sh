@@ -23,6 +23,10 @@ git rev-parse --git-dir >/dev/null 2>&1 || {
 cd "$(git rev-parse --show-toplevel)" || exit 2
 
 denylist="${RESEARCH_KIT_DENYLIST:-$HOME/.config/research-kit/denylist}"
+# Native Windows callers may supply drive letters and backslash separators.
+case "$OSTYPE" in
+msys* | cygwin*) denylist=$(cygpath -u "$denylist") || exit 2 ;;
+esac
 if [ ! -f "$denylist" ]; then
 	echo "leak-check: no denylist at $denylist - skipping denylist layer" >&2
 	denylist=""
@@ -49,8 +53,10 @@ tree_stream() {
 }
 
 scan() {
-	awk -F'\t' -v deny="$denylist" '
+	LEAK_CHECK_DENYLIST="$denylist" awk -F'\t' '
     BEGIN {
+      # Environment values are literal; awk -v interprets path backslashes.
+      deny = ENVIRON["LEAK_CHECK_DENYLIST"]
       home = "/ho" "me/"; users = "/Us" "ers/"
       public_owner = "nik" "110403"
       public_url = "https://github\\.com/" public_owner "/(research-kit|ai-architecture)"
