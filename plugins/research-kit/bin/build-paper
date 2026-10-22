@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build a research-kit paper with pandoc and conservative post-build guards."""
 import argparse
+import os
 import re
 import shutil
 import subprocess
@@ -15,6 +16,14 @@ def command_version(command):
     return result.stdout.splitlines()[0] if result.stdout else command
 
 
+def aliases(first, second):
+    """Return whether two existing paths name the same filesystem object."""
+    try:
+        return os.path.samefile(first, second)
+    except OSError:
+        return False
+
+
 def main():
     for _s in (sys.stdout, sys.stderr):  # UTF-8 output regardless of the locale (e.g. Windows cp1252)
         try:
@@ -25,10 +34,21 @@ def main():
     parser.add_argument("--soft", action="store_true", help="report guard failures but exit zero")
     parser.add_argument("--to", choices=("html", "pdf", "docx"), default="pdf",
                         help="requested output (default: pdf; HTML fallback if no PDF engine)")
+    parser.add_argument("--reference-doc", metavar="PATH",
+                        help="DOCX style reference document (only with --to docx)")
     parser.add_argument("--grounding", action="store_true",
                         help="also run quote and citation checks; this is not full-draft proof")
     parser.add_argument("paper_dir", nargs="?", default="10_paper")
     args = parser.parse_args()
+    if args.reference_doc and args.to != "docx":
+        parser.error("--reference-doc is only supported with --to docx")
+    reference_doc = None
+    if args.reference_doc:
+        reference_doc = Path(args.reference_doc).expanduser().resolve()
+        if not reference_doc.exists():
+            parser.error(f"--reference-doc not found: {reference_doc}")
+        if not reference_doc.is_file():
+            parser.error(f"--reference-doc must be a file: {reference_doc}")
     paper_dir = Path(args.paper_dir).resolve()
     paper = paper_dir / "paper.md"
     if not paper.is_file():
@@ -60,8 +80,12 @@ def main():
         pandoc_args.append("--metadata-file=metadata.yaml")
     output = paper_dir / f"paper.{actual}"
     log = paper_dir / "build.log"
+    if reference_doc and (aliases(reference_doc, output) or aliases(reference_doc, log)):
+        parser.error("--reference-doc must not alias a build output (paper.docx or build.log)")
     log.write_text(f"pandoc: {command_version('pandoc')}\nengine: {engine}\n", encoding="utf-8")
     print(log.read_text(encoding="utf-8"), end="")
+    if reference_doc:
+        pandoc_args.append(f"--reference-doc={reference_doc}")
     result = subprocess.run([*pandoc_args, "-o", output.name, paper.name], cwd=paper_dir,
                             capture_output=True, text=True, encoding="utf-8", errors="replace")
     with log.open("a", encoding="utf-8") as handle:

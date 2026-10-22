@@ -236,9 +236,16 @@ def quotation_styles(root):
         return {"Quote": True, "IntenseQuote": True}, None, ()
     styles = {}
     defaults = []
+    warnings = []
     for style in root.findall(NS + "style"):
         ident = style.get(NS + "styleId")
         if ident and style.get(NS + "type") == "paragraph":
+            if ident in styles:
+                styles[ident] = None
+                warnings.append(
+                    f"ambiguous duplicate paragraph style id {ident!r}; it is not classified"
+                )
+                continue
             based = style.find(NS + "basedOn")
             styles[ident] = False if based is None else based.get(NS + "val")
             if style.get(NS + "default") in ("1", "true", "on"):
@@ -276,13 +283,12 @@ def quotation_styles(root):
         return result.get(ident, value)
     for ident in styles:
         resolve(ident)
-    warnings = ()
     if len(defaults) > 1:
-        warnings = ("ambiguous multiple default paragraph styles; paragraphs without pStyle are not classified",)
+        warnings.append("ambiguous multiple default paragraph styles; paragraphs without pStyle are not classified")
         default_style = None
     else:
         default_style = defaults[0] if defaults else None
-    return result, default_style, warnings
+    return result, default_style, tuple(warnings)
 
 
 def extract(path: Path):

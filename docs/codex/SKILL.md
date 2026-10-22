@@ -46,6 +46,10 @@ On PowerShell, pass explicit note paths instead of relying on shell glob expansi
 of a complete draft. Canonical workflow command examples use the installed helper
 paths above; consult the copied `workflows/` folders for their full assets.
 
+For static DOCX output, `build-paper --to docx --reference-doc <path>` uses a
+pandoc style reference document. Read [the Word export walkthrough](../word-export.md)
+for template creation and its one-way/static-citation limits.
+
 For an ordinary Word lecture, use `$research-kit` to request the Word workflow.
 Run `check-docx --inventory`, then have the user explicitly confirm every
 `source_md` and page in the new CSV before `--bindings`. Never ask an LLM to

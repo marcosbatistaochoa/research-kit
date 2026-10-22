@@ -48,7 +48,8 @@ single-quote opener remains conservatively ambiguous and is treated as a possess
 Word's built-in `Quote` and `IntenseQuote` paragraph styles, including derived
 styles and a single default paragraph style, are also reported as unextracted
 coverage rather than verified quotations. Ambiguous multiple defaults warn rather
-than guessing. Inventory prints coverage
+than guessing. Duplicate paragraph style IDs are likewise treated as ambiguous
+coverage rather than allowing one definition to overwrite another. Inventory prints coverage
 warnings as well as its count, and binding checks carry the same warnings into
 their terminal output and reports. Outputs are new-only.
 For spreadsheet safety, every CSV cell beginning with an apostrophe, `=`, `+`,

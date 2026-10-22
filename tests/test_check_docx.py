@@ -282,6 +282,49 @@ class CheckDocx(unittest.TestCase):
             "cannot resolve paragraph style 'Broken' conservatively", result.stdout
         )
 
+    def test_duplicate_paragraph_style_ids_fail_binding_coverage(self):
+        doc = f'''<w:document xmlns:w="{W}"><w:body>
+          <w:p><w:pPr><w:pStyle w:val="Custom"/></w:pPr><w:r><w:t>undelimited block quote</w:t></w:r></w:p>
+          <w:p><w:r><w:t>“{QUOTE}”</w:t></w:r></w:p><w:sectPr/></w:body></w:document>'''
+        styles = f'''<w:styles xmlns:w="{W}"><w:style w:type="paragraph" w:styleId="Custom"><w:basedOn w:val="Quote"/></w:style><w:style w:type="paragraph" w:styleId="Custom"/><w:style w:type="paragraph" w:styleId="Normal"/></w:styles>'''
+        docx_parts(self.doc, doc, styles=styles)
+        inv = Path(self.t.name) / "duplicate-style.csv"
+        inventory = self.toolrun("--inventory", inv)
+        self.assertEqual(inventory.returncode, 1, inventory.stdout + inventory.stderr)
+        self.assertIn(
+            "ambiguous duplicate paragraph style id 'Custom'", inventory.stdout
+        )
+        self.assertIn(
+            "cannot resolve paragraph style 'Custom' conservatively", inventory.stdout
+        )
+        with inv.open(encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+        self.assertEqual([row["quote"] for row in rows], [QUOTE])
+        for row in rows:
+            row["source_md"], row["page"] = "02_sources/md/lei2023financial.md", "2"
+        bindings = Path(self.t.name) / "duplicate-style-bindings.csv"
+        with bindings.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=rows[0])
+            writer.writeheader()
+            writer.writerows(rows)
+        checked = self.toolrun("--bindings", bindings)
+        self.assertEqual(checked.returncode, 1, checked.stdout + checked.stderr)
+        self.assertIn("PASS body:2:0 QUOTE_MATCH", checked.stdout)
+        self.assertIn("ambiguous duplicate paragraph style id 'Custom'", checked.stdout)
+
+        normal = doc.replace('w:val="Custom"', 'w:val="Normal"')
+        docx_parts(
+            self.doc,
+            normal,
+            styles=f'''<w:styles xmlns:w="{W}"><w:style w:type="paragraph" w:styleId="Normal"/></w:styles>''',
+        )
+        self.assertEqual(
+            self.toolrun(
+                "--inventory", Path(self.t.name) / "normal-style.csv"
+            ).returncode,
+            0,
+        )
+
     def test_default_quote_style_and_long_inheritance_chain_warn_without_traceback(
         self,
     ):

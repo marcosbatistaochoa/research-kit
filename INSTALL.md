@@ -131,6 +131,10 @@ python "$researchKit\bin\verify-quotes" --strict 01_notes/lit/lei2023financial.m
 python "$researchKit\bin\build-paper" --to html
 ```
 
+For a static DOCX export styled with a pandoc reference document, see the
+[Word export walkthrough](docs/word-export.md). It covers Unix and PowerShell
+commands, template creation, and the one-way/static-citation limits.
+
 ### Codex adapter
 
 Install one self-contained Codex skill into an existing project; it does not alter
