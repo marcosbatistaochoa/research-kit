@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+"""Read-only setup diagnostics. Print proposed fixes; never apply them."""
+import argparse
+import codecs
+import filecmp
+import json
+import ntpath
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+
+MIN_PANDOC = (2, 11)  # build-paper uses integrated --citeproc.
+TIMEOUT = 3
+PROJECT_DIRS = ("00_admin", "01_notes", "02_sources", "03_code", "05_figures",
+                "06_tables", "07_references", "10_paper", "01_notes/lit",
+                "02_sources/pdf", "02_sources/md")
+HELPERS = ("doctor", "new-project", "pdf2md", "build-paper", "check-docx",
+           "verify-quotes", "check-claims", "check-bib", "lit-search", "new-pipeline")
+
+
+def fixes(windows, macos=None, linux=None):
+    return {"windows": windows, "macos": macos or windows, "linux": linux or windows}
+
+
+def package_fixes(package):
+    return {
+        "python": fixes("winget install Python.Python.3.12 OR choco install python",
+                        "brew install python", "apt install python3 OR dnf install python3"),
+        "pdftotext": fixes("winget install oschwartz10612.Poppler OR choco install poppler",
+                           "brew install poppler", "apt install poppler-utils OR dnf install poppler-utils"),
+        "pandoc": fixes("winget install JohnMacFarlane.Pandoc OR choco install pandoc",
+                        "brew install pandoc", "apt install pandoc OR dnf install pandoc"),
+    }[package]
+
+
+def tool_version(path, flag):
+    """Run only an explicit executable path, with a fixed version argument."""
+    try:
+        result = subprocess.run([str(path), flag], capture_output=True, text=True,
+                                encoding="utf-8", errors="replace", timeout=TIMEOUT,
+                                stdin=subprocess.DEVNULL, shell=False)
+    except subprocess.TimeoutExpired:
+        return None, "version probe timed out (3s)"
+    except OSError as error:
+        return None, "version probe failed: " + str(error)
+    lines = (result.stdout + "\n" + result.stderr).strip().splitlines()
+    first = lines[0][:240] if lines else "no version output"
+    if result.returncode:
+        return None, "version probe exited {}: {}".format(result.returncode, first)
+    return first, None
+
+
+def canonical_bin(helper):
+    """Only trust the plugin containing this helper, not a guessed checkout."""
+    candidate = helper.parent
+    marker = candidate.parent / ".claude-plugin/plugin.json"
+    try:
+        if candidate.name == "bin" and json.loads(marker.read_text(encoding="utf-8")).get("name") == "research-kit":
+            return candidate
+    except (OSError, ValueError, AttributeError):
+        pass
+    return None
+
+
+def diagnose(workflow, project=None):
+    project = Path.cwd() if project is None else Path(project)
+    findings = []
+
+    def add(ident, evidence, repair):
+        findings.append({"id": ident, "severity": "error", "evidence": evidence, "fixes": repair})
+
+    if sys.version_info < (3, 9):
+        add("python.too-old", "Python " + sys.version.split()[0] + "; need >=3.9", package_fixes("python"))
+
+    tools = []
+    if workflow in ("pdf", "all"):
+        tools.append(("pdftotext", "-v"))
+    if workflow in ("build", "all"):
+        tools.append(("pandoc", "--version"))
+    for name, flag in tools:
+        path = shutil.which(name)
+        if not path:
+            add(name + ".missing", name + " not found on PATH", package_fixes(name))
+            continue
+        version, error = tool_version(path, flag)
+        if error:
+            add(name + ".unusable", str(path) + ": " + error, package_fixes(name))
+        elif name == "pandoc":
+            # build-paper prefers Typst when present; that backend needs 3.1.
+            minimum = (3, 1) if shutil.which("typst") else MIN_PANDOC
+            match = re.match(r"pandoc\s+(\d+)\.(\d+)", version, re.I)
+            if not match:
+                add("pandoc.version-unknown", str(path) + ": " + version, package_fixes(name))
+            elif tuple(map(int, match.groups())) < minimum:
+                requirement = "3.1 (Typst backend)" if minimum == (3, 1) else "2.11 (--citeproc)"
+                add("pandoc.too-old", str(path) + ": " + version + "; need >=" + requirement, package_fixes(name))
+
+    helper = Path(__file__).resolve()
+    canonical = canonical_bin(helper)
+    path_fix = fixes("Select the intended plugin bin with Get-Command; use its quoted absolute helper path.",
+                     "Select the intended plugin bin with command -v; use its quoted absolute helper path.",
+                     "Select the intended plugin bin with command -v; use its quoted absolute helper path.")
+    selected = {"pdf": ("doctor", "pdf2md"), "build": ("doctor", "build-paper"),
+                 "word": ("doctor", "new-project", "check-docx", "verify-quotes"), "all": HELPERS}[workflow]
+    for name in selected:
+        resolved = shutil.which(name)
+        if resolved and Path(resolved).resolve() != helper.parent / name:
+            add("path.helper-shadowed", name + " resolves to " + str(Path(resolved).resolve())
+                + "; this plugin bin: " + str(helper.parent), path_fix)
+
+    if canonical:
+        adapter = project / ".agents/skills/research-kit/bin"
+        if adapter.is_dir() and adapter.resolve() != canonical:
+            for name in HELPERS:
+                left, right = canonical / name, adapter / name
+                if not left.is_file() or not right.is_file():
+                    continue  # Absence is not proof of a stale copy.
+                try:
+                    same = filecmp.cmp(left, right, shallow=False)
+                except OSError:
+                    continue  # An unreadable file cannot establish a byte mismatch.
+                if not same:
+                    add("adapter.stale-helper", str(right) + " differs from " + str(left),
+                        fixes("Preserve the differing adapter; ask the user how to replace it. Do not overwrite it."))
+
+    if sys.platform == "win32":
+        bash = shutil.which("bash")
+        system_root = os.environ.get("SystemRoot")
+        if bash and system_root and ntpath.normcase(ntpath.normpath(bash)) == ntpath.normcase(ntpath.join(system_root, "System32", "bash.exe")):
+            add("path.windows-bash-stub", "bash resolves to " + bash,
+                fixes("Use PowerShell with py -3 and a quoted helper path, or select an installed Git Bash; do not use the System32 stub."))
+        encodings = [getattr(stream, "encoding", None) for stream in (sys.stdout, sys.stderr)]
+        try:
+            utf8 = all(encoding and codecs.lookup(encoding).name == "utf-8" for encoding in encodings)
+        except LookupError:
+            utf8 = False
+        if not utf8:
+            add("console.non-utf8", "stdout/stderr encodings: " + repr(encodings),
+                fixes("For this PowerShell session set $env:PYTHONIOENCODING='utf-8'; rerun with py -3."))
+
+    directory_fix = fixes("Choose a writable project directory or ask its owner to grant access; do not elevate privileges.")
+    for directory in [project] + [project / name for name in PROJECT_DIRS if (project / name).exists()]:
+        if not directory.is_dir() or not os.access(directory, os.W_OK | os.X_OK):
+            add("project.not-writable", str(directory) + ": not a writable/searchable directory (metadata check)", directory_fix)
+    return {"schema_version": 1, "workflow": workflow, "findings": findings}
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--workflow", choices=("pdf", "build", "word", "all"), default="all")
+    parser.add_argument("--json", action="store_true", help="stable JSON, including an empty findings list when healthy")
+    args = parser.parse_args(argv)
+    report = diagnose(args.workflow)
+    if args.json:
+        print(json.dumps(report, ensure_ascii=True, indent=2))
+    elif not report["findings"]:
+        print("doctor: OK ({}); no setup findings".format(args.workflow))
+    else:
+        for finding in report["findings"]:
+            # Escape console-unsafe characters and control characters in path data.
+            print("{}: {}".format(finding["id"], ascii(finding["evidence"])))
+            for platform, fix in finding["fixes"].items():
+                print("  {}: {}".format(platform, fix))
+    return 1 if report["findings"] else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

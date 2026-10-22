@@ -16,7 +16,12 @@ environment-only repair attempts within existing permissions, then report.
 An occupied target is not an environment fault; never clear it as a repair.
 
 1. Ask where the project should live if the user has not said. Never pick a path inside
-   an existing project.
+   an existing project. Before first use, run `doctor --workflow word` from the
+   existing parent directory of the target: scaffolding, like Word checks, needs
+   only Python's standard library. Use the intended kit's quoted `bin/doctor`
+   path with `python3` (or `py -3` in PowerShell) if it is not on PATH. Follow the
+   recovery guide for findings before creating the project; do not require
+   pandoc or pdftotext just to scaffold.
 2. Run:
 
    ```
