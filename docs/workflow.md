@@ -47,6 +47,13 @@ path) win over the file. `new-project` always scaffolds the default layout.
 Unknown keys, absolute paths and `..` are refused with a message. `doctor` and the `new-*` scaffolds
 still use the default names.
 
+## Optional note field: tier
+
+A literature note may carry `tier: primary | secondary | partisan` (or the emoji green, yellow, red
+circles). Primary is documents, data and testimony; secondary is scholarship and journalism; partisan
+is a camp's own outlet or advocacy. `source-reader` proposes it; `verify-quotes` rejects other values
+and accepts notes without it.
+
 ## Evidence boundaries
 
 Search receipts record provider status. A run that loses Semantic Scholar or
