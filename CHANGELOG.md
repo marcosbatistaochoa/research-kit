@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- `check-docx` and `build-paper` no longer crash on Windows consoles with a non-UTF-8 code page when
+  printing text such as CJK quotation marks; output is now always UTF-8.
+- `check-docx` reports unsupported or ambiguous Word quotation coverage instead of silently treating it
+  as verified, including quote paragraph styles and additional Word content types.
+
+### Added
+
+- `build-paper --to docx --reference-doc PATH` applies a user-maintained pandoc style reference without
+  changing it; [Word export](docs/word-export.md) documents this one-way output and its limits.
+- The portable smoke test now exports a styled DOCX and runs the no-Zotero Word binding demonstration in
+  every Windows, macOS and Linux CI cell. Native platform tests remain documented separately where they
+  are still pending.
+
 ## 0.1.3
 
 ### Breaking changes (upgrading from 0.1.2)

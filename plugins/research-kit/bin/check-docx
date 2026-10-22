@@ -90,13 +90,16 @@ def open_docx(path: Path):
                 raise ValueError("archive decompression size limit exceeded")
         if "word/document.xml" not in names:
             raise ValueError("missing word/document.xml")
-        return {n: z.read(n) for n in names if n in ("word/document.xml", "word/footnotes.xml", "word/endnotes.xml")}, names
+        return {n: z.read(n) for n in names if n in ("word/document.xml", "word/footnotes.xml", "word/endnotes.xml", "word/styles.xml")}, names
+
+
+DEAD_REVISIONS = frozenset((NS + "del", NS + "moveFrom"))
 
 
 def text_of(p):
     out = []
     def walk(e, dead=False):
-        dead = dead or e.tag in (NS + "del", NS + "delText", NS + "instrText")
+        dead = dead or e.tag in DEAD_REVISIONS or e.tag in (NS + "delText", NS + "instrText")
         if dead:
             return
         if e.tag == NS + "t": out.append(e.text or "")
@@ -111,12 +114,16 @@ def text_of(p):
 
 def paragraphs(root, allowed_notes=None):
     rows = []
-    def walk(e, blocked=False):
+    def walk(e, blocked=False, dead=False):
+        dead = dead or e.tag in DEAD_REVISIONS
+        if dead:
+            return
         blocked = blocked or e.tag == NS + "txbxContent"
         if e.tag == NS + "p" and not blocked:
-            rows.append(text_of(e))
+            style = e.find(NS + "pPr/" + NS + "pStyle")
+            rows.append((text_of(e), None if style is None else style.get(NS + "val")))
             return
-        for c in e: walk(c, blocked)
+        for c in e: walk(c, blocked, dead)
     if allowed_notes is None:
         body = root.find(NS + "body")
         if body is not None: walk(body)
@@ -127,9 +134,47 @@ def paragraphs(root, allowed_notes=None):
     return rows
 
 
-def quoted(part, paras, warnings):
+def single_quote_warnings(part, paras, warnings):
+    """Warn for single-quote candidates while leaving word apostrophes alone."""
+    active = None
+    for pi, (p, _) in enumerate(paras, 1):
+        for i, char in enumerate(p):
+            if char not in ("'", "‘", "’"):
+                continue
+            before = p[i - 1] if i else ""
+            after = p[i + 1] if i + 1 < len(p) else ""
+            attached = before.isalnum() and after.isalnum()
+            trailing = before.isalnum() and not after.isalnum()
+            if char == "’":
+                if active and active[0] == "‘":
+                    warnings.append(f"{part} paragraph {active[1]}: unsupported single-quote delimiter")
+                    active = None
+                elif not (attached or trailing):
+                    warnings.append(f"{part} paragraph {pi}: unsupported single-quote delimiter")
+            elif char == "‘":
+                if active:
+                    warnings.append(f"{part} paragraph {active[1]}: unsupported single-quote delimiter")
+                active = (char, pi)
+            elif active and active[0] == "'":
+                warnings.append(f"{part} paragraph {active[1]}: unsupported single-quote delimiter")
+                active = None
+            elif not (attached or trailing):
+                active = (char, pi)
+    if active:
+        warnings.append(f"{part} paragraph {active[1]}: unsupported single-quote delimiter")
+
+
+def quoted(part, paras, warnings, quote_styles, default_style, style_warnings):
     out = []
-    for pi, p in enumerate(paras, 1):
+    for warning in style_warnings:
+        warnings.append(f"{part}: {warning}")
+    single_quote_warnings(part, paras, warnings)
+    for pi, (p, style) in enumerate(paras, 1):
+        style = style or default_style
+        if style and quote_styles.get(style, False):
+            warnings.append(f"{part} paragraph {pi}: quotation paragraph style {style!r} is not extracted")
+        elif style and quote_styles.get(style) is None:
+            warnings.append(f"{part} paragraph {pi}: cannot resolve paragraph style {style!r} conservatively")
         unsupported = sorted({c for c in p if c in UNSUPPORTED_QUOTE_DELIMITERS})
         if unsupported:
             delimiters = ", ".join(repr(c) for c in unsupported)
@@ -150,16 +195,6 @@ def quoted(part, paras, warnings):
                 out.append((f"{part}:{pi}:{a[0]}", value))
             else:
                 warnings.append(f"{part} paragraph {pi}: empty double-quoted passage")
-        for i, c in enumerate(p):
-            if c == "‘" or (c == "’" and not (i and i + 1 < len(p) and p[i - 1].isalnum() and p[i + 1].isalnum())):
-                warnings.append(f"{part} paragraph {pi}: unsupported single-quote delimiter")
-                break
-            if c == "'":
-                before = p[i - 1] if i else " "
-                after = p[i + 1] if i + 1 < len(p) else " "
-                if not (before.isalnum() and after.isalnum()):
-                    warnings.append(f"{part} paragraph {pi}: unsupported single-quote delimiter")
-                    break
     return out
 
 
@@ -172,7 +207,7 @@ def live_refs(root):
     """Yield live Word note references; tracked deletions do not contribute content."""
     out = []
     def walk(e, dead=False):
-        dead = dead or e.tag in (NS + "del", NS + "delText")
+        dead = dead or e.tag in DEAD_REVISIONS or e.tag == NS + "delText"
         if dead:
             return
         if e.tag in (NS + "footnoteReference", NS + "endnoteReference"):
@@ -181,6 +216,79 @@ def live_refs(root):
             walk(child, dead)
     walk(root)
     return out
+
+
+def live_elements(root):
+    """Yield elements in Word's accept-all-changes view (delete/moveFrom omitted)."""
+    def walk(e, dead=False):
+        dead = dead or e.tag in DEAD_REVISIONS
+        if dead:
+            return
+        yield e
+        for child in e:
+            yield from walk(child, dead)
+    return walk(root)
+
+
+def quotation_styles(root):
+    """Return paragraph-style ids that derive from Word's Quote styles."""
+    if root is None:
+        return {"Quote": True, "IntenseQuote": True}, None, ()
+    styles = {}
+    defaults = []
+    warnings = []
+    for style in root.findall(NS + "style"):
+        ident = style.get(NS + "styleId")
+        if ident and style.get(NS + "type") == "paragraph":
+            if ident in styles:
+                styles[ident] = None
+                warnings.append(
+                    f"ambiguous duplicate paragraph style id {ident!r}; it is not classified"
+                )
+                continue
+            based = style.find(NS + "basedOn")
+            styles[ident] = False if based is None else based.get(NS + "val")
+            if style.get(NS + "default") in ("1", "true", "on"):
+                defaults.append(ident)
+    result = {}
+    def resolve(ident):
+        if ident in result:
+            return result[ident]
+        if ident in ("Quote", "IntenseQuote"):
+            result[ident] = True
+            return True
+        path, seen, current = [], set(), ident
+        while current not in result:
+            if current in ("Quote", "IntenseQuote"):
+                value = True
+                result[current] = value
+                break
+            if current not in styles or current in seen:
+                value = None
+                break
+            seen.add(current)
+            path.append(current)
+            parent = styles[current]
+            if parent is False:
+                value = False
+                break
+            if not parent:
+                value = None
+                break
+            current = parent
+        else:
+            value = result[current]
+        for member in path:
+            result[member] = value
+        return result.get(ident, value)
+    for ident in styles:
+        resolve(ident)
+    if len(defaults) > 1:
+        warnings.append("ambiguous multiple default paragraph styles; paragraphs without pStyle are not classified")
+        default_style = None
+    else:
+        default_style = defaults[0] if defaults else None
+    return result, default_style, tuple(warnings)
 
 
 def extract(path: Path):
@@ -193,8 +301,10 @@ def extract(path: Path):
     for member, key in (("word/footnotes.xml", "footnote"), ("word/endnotes.xml", "endnote")):
         if member in members:
             parts[key] = xml(members[member], member)
+    style_root = xml(members["word/styles.xml"], "word/styles.xml") if "word/styles.xml" in members else None
+    quote_styles, default_style, style_warnings = quotation_styles(style_root)
     for name, root in parts.items():
-        if any(e.tag in UNSUPPORTED for e in root.iter()):
+        if any(e.tag in UNSUPPORTED for e in live_elements(root)):
             warnings.append(f"{name}: unsupported content-bearing structure or citation field")
     note_maps = {}
     for kind in ("footnote", "endnote"):
@@ -218,9 +328,10 @@ def extract(path: Path):
             continue
         included[kind].add(ident)
         pending.extend(live_refs(matches[0]))
-    out = quoted("body", paragraphs(doc), warnings)
+    out = quoted("body", paragraphs(doc), warnings, quote_styles, default_style, style_warnings)
     for member, part in (("word/footnotes.xml", "footnote"), ("word/endnotes.xml", "endnote")):
-        if part in parts: out += quoted(part, paragraphs(parts[part], included[part]), warnings)
+        if part in parts:
+            out += quoted(part, paragraphs(parts[part], included[part]), warnings, quote_styles, default_style, style_warnings)
     return out, warnings
 
 
@@ -247,6 +358,11 @@ def load_vq(tool: Path):
 
 
 def main(argv):
+    for _s in (sys.stdout, sys.stderr):  # UTF-8 output regardless of the locale (e.g. Windows cp1252)
+        try:
+            _s.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError, OSError):
+            pass
     if len(argv) == 2 and argv[1] in ("-h", "--help"):
         print(__doc__); return 0
     args = argv[1:]
@@ -280,7 +396,7 @@ def main(argv):
             print("FAIL coverage", warning)
         return 0 if rows and not warnings else 1
     try:
-        with bind.open(newline="", encoding="utf-8") as f:
+        with bind.open(newline="", encoding="utf-8-sig") as f:
             reader = csv.DictReader(f); bindings = [{k: ucell(v or "") for k, v in row.items()} for row in reader]; got = reader.fieldnames or []
         if set(FIELDS) - set(got): raise ValueError("bindings missing required inventory columns")
     except (OSError, ValueError, csv.Error) as e: return fail(f"malformed bindings ({e})", 2)

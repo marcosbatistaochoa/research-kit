@@ -33,8 +33,8 @@ helpers, not evidence of live Codex discovery or imported Claude permissions.
 Checking typed quotations in a saved Word lecture needs neither Zotero nor
 prewritten notes: inventory quotations, explicitly map each CSV row to its
 source Markdown file and page, then run the bindings check. See the
-[lecture quickstart](docs/lecture.md) for native Windows and Unix commands, the
-reproducible Word demo, and the scope of that result.
+[Word check guide](docs/word.md) for commands, the reproducible demo, and the
+scope of that result.
 
 ## What you get
 
@@ -57,7 +57,7 @@ reproducible Word demo, and the scope of that result.
 | Tool | [pdf2md](plugins/research-kit/bin/pdf2md) | PDF to Markdown with page markers |
 | Tool | [check-claims](plugins/research-kit/bin/check-claims) | Check each cited note (runs `verify-quotes` on it) and flag uncited or unverified claims; does not judge meaning |
 | Tool | [check-bib](plugins/research-kit/bin/check-bib) | Check bibliography structure and citation coverage |
-| Tool | [build-paper](plugins/research-kit/bin/build-paper) | Build PDF, HTML or DOCX with pandoc |
+| Tool | [build-paper](plugins/research-kit/bin/build-paper) | Build PDF, HTML or DOCX with pandoc; [Word export](docs/word-export.md) is one-way output |
 | Tool | [new-project](plugins/research-kit/bin/new-project) | Scaffold a research project |
 | Tool | [new-pipeline](plugins/research-kit/bin/new-pipeline) | Scaffold an R or Python pipeline |
 

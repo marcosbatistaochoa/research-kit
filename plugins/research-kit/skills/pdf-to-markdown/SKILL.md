@@ -10,6 +10,12 @@ Requires: `pdftotext` (poppler); optional `ocrmypdf`, `qpdf`.
 Convert once, then read the markdown instead of the PDF: it is cheaper to read, greppable,
 and every page starts with a `<!-- page N -->` marker so quotes can cite a page.
 
+Before first use, run `doctor --workflow pdf` from the project root. If it is
+not on PATH, invoke the intended kit's quoted `bin/doctor` path with `python3`
+(or `py -3` in PowerShell). Resolve findings through the recovery guide below;
+doctor prints proposed fixes but never installs or changes anything. OCR and
+decryption tools are conditional on the input and are checked separately.
+
 ```
 pdf2md 02_sources/pdf/*.pdf --out 02_sources/md/
 ```

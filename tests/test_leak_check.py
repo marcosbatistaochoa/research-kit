@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "leak-check.sh"
 HOME_PATH = "/ho" + "me/x/notes"  # built in pieces so this file is itself clean
@@ -26,7 +27,94 @@ PUBLIC_DOCS = (
 )
 
 
-@unittest.skipUnless(shutil.which("bash"), "leak-check.sh requires a bash executable")
+def _find_bash(is_windows=None):
+    """Absolute path of a usable bash, or None.
+
+    On Windows, CreateProcess resolves a bare "bash" to the WSL launcher in System32
+    before PATH, so prefer Git for Windows' bash and never accept the System32 one.
+    """
+    is_windows = os.name == "nt" if is_windows is None else is_windows
+    found = shutil.which("bash")
+    if not is_windows:
+        return str(Path(found).resolve()) if found else None
+    sysdir = os.path.normcase(
+        os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "")
+    )
+    if found and not os.path.normcase(os.path.abspath(found)).startswith(sysdir):
+        return str(Path(found).resolve())
+    git = shutil.which("git")
+    if git:
+        git_path = Path(git).resolve()
+        parent = git_path.parent
+        if parent.name.lower() == "bin" and parent.parent.name.lower() == "mingw64":
+            base = parent.parent.parent  # <Git>\mingw64\bin\git.exe
+        elif parent.name.lower() in ("cmd", "bin"):
+            base = parent.parent  # <Git>\cmd\git.exe or <Git>\bin\git.exe
+        else:
+            base = None
+        for rel in ("bin/bash.exe", "usr/bin/bash.exe"):
+            if base and (base / rel).is_file():
+                return str(base / rel)
+    return None
+
+
+class FindBash(unittest.TestCase):
+    def test_relative_path_result_becomes_absolute(self):
+        with mock.patch(__name__ + ".shutil.which", return_value="relative/bash"):
+            self.assertEqual(_find_bash(), str(Path("relative/bash").resolve()))
+
+    def test_windows_mingw_git_layout_finds_usr_bash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            git = Path(tmp) / "Git"
+            executable = git / "mingw64/bin/git.exe"
+            bash = git / "usr/bin/bash.exe"
+            executable.parent.mkdir(parents=True)
+            executable.touch()
+            bash.parent.mkdir(parents=True)
+            bash.touch()
+            with (
+                mock.patch(
+                    __name__ + ".shutil.which",
+                    side_effect=lambda name: str(executable) if name == "git" else None,
+                ),
+            ):
+                self.assertEqual(_find_bash(is_windows=True), str(bash.resolve()))
+
+    def test_windows_standard_git_layout_finds_bin_bash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            git = Path(tmp) / "Git"
+            executable = git / "cmd/git.exe"
+            bash = git / "bin/bash.exe"
+            executable.parent.mkdir(parents=True)
+            executable.touch()
+            bash.parent.mkdir(parents=True)
+            bash.touch()
+            with mock.patch(
+                __name__ + ".shutil.which",
+                side_effect=lambda name: str(executable) if name == "git" else None,
+            ):
+                self.assertEqual(_find_bash(is_windows=True), str(bash.resolve()))
+
+    def test_windows_system_bash_without_git_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            system_root = Path(tmp) / "Windows"
+            stub = system_root / "System32/bash.exe"
+            with (
+                mock.patch.dict(os.environ, {"SystemRoot": str(system_root)}),
+                mock.patch(
+                    __name__ + ".shutil.which",
+                    side_effect=lambda name: str(stub) if name == "bash" else None,
+                ),
+            ):
+                self.assertIsNone(_find_bash(is_windows=True))
+
+
+BASH = _find_bash()
+
+
+@unittest.skipUnless(
+    BASH, "leak-check.sh requires a non-WSL bash (e.g. Git for Windows)"
+)
 class LeakCheck(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -52,7 +140,7 @@ class LeakCheck(unittest.TestCase):
             ),
         )
         return subprocess.run(
-            ["bash", str(SCRIPT), *args],
+            [BASH, str(SCRIPT), *args],
             cwd=self.repo,
             env=env,
             capture_output=True,
@@ -93,7 +181,7 @@ class LeakCheck(unittest.TestCase):
             (self.repo / name).write_text(content + "\n", encoding="utf-8")
             self.git("add", name)
             r = subprocess.run(
-                ["bash", str(SCRIPT)],
+                [BASH, str(SCRIPT)],
                 cwd=self.repo,
                 env=env,
                 capture_output=True,
@@ -126,7 +214,7 @@ class LeakCheck(unittest.TestCase):
             path.write_text(text + "\n", encoding="utf-8")
             self.git("add", name)
             r = subprocess.run(
-                ["bash", str(SCRIPT)],
+                [BASH, str(SCRIPT)],
                 cwd=self.repo,
                 env=env,
                 capture_output=True,
@@ -137,6 +225,22 @@ class LeakCheck(unittest.TestCase):
 
     def test_denylist_case_insensitive(self):
         self.assertEqual(self.run_check("about SECRETPROJECT today").returncode, 1)
+
+    def test_denylist_path_preserves_spaces_and_backslashes(self):
+        # Windows supplies native separators; POSIX can exercise literal escapes.
+        directory = (
+            "paths with spaces" if os.name == "nt" else r"paths with spaces\temp\Users"
+        )
+        self.deny = Path(self.tmp.name) / directory / "denylist"
+        self.deny.parent.mkdir()
+        self.deny.write_text("SecretProject\n", encoding="utf-8")
+        for mode in ("--staged", "--tree", "--history"):
+            with self.subTest(mode=mode):
+                if mode == "--history":
+                    self.git("commit", "-qm", "fixture")
+                result = self.run_check("about SECRETPROJECT today", mode)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("f.txt:1: [denylist] term #1", result.stdout)
 
     def test_noreply_ok(self):
         r = self.run_check("12345+u@users.noreply.github.com and noreply@example.org")
@@ -159,7 +263,7 @@ class LeakCheck(unittest.TestCase):
         self.git("commit", "-qam", "y")
         env = dict(os.environ, RESEARCH_KIT_DENYLIST=str(self.deny))
         run = lambda m: subprocess.run(
-            ["bash", str(SCRIPT), m],
+            [BASH, str(SCRIPT), m],
             cwd=self.repo,
             env=env,
             capture_output=True,
@@ -181,7 +285,7 @@ class LeakCheck(unittest.TestCase):
         env = dict(os.environ, RESEARCH_KIT_DENYLIST=str(self.deny))
         try:
             result = subprocess.run(
-                ["bash", str(SCRIPT), mode],
+                [BASH, str(SCRIPT), mode],
                 cwd=self.repo,
                 env=env,
                 capture_output=True,

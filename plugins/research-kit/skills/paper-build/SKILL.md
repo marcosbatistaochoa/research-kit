@@ -34,9 +34,12 @@ bundled: pandoc's default citation style is used; drop a `.csl` into `10_paper/`
 
     Use an absolute, quoted path (PowerShell: `python` or `py -3`). It logs tool versions,
     runs `pandoc --citeproc`, and writes the requested PDF, HTML or DOCX without a mislabeled fallback.
-    PDF prefers Typst then XeLaTeX, otherwise it explicitly writes HTML. The compile guard fails on
-    literal `???`, unresolved citations and missing image/include files. `--grounding` opt-in runs
-    local quote/claim checks but is not proof of the full draft; `--soft` downgrades failures for hooks.
+     PDF prefers Typst then XeLaTeX, otherwise it explicitly writes HTML. The compile guard fails on
+     literal `???`, unresolved citations and missing image/include files. `--grounding` opt-in runs
+     local quote/claim checks but is not proof of the full draft; `--soft` downgrades failures for hooks.
+     For DOCX, optional `--reference-doc /path/to/reference.docx` applies pandoc styles and document
+     properties without changing the template. The result is a static, one-way export with static
+     citations, not a live Zotero document or a round-trip editor; see [Word export](../../../../docs/word-export.md).
 3. Fix each reported problem at its source; never silence the guard.
 
 Bib discipline: one `.bib` per project, ideally exported by the reference manager. Verify author,
