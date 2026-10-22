@@ -33,19 +33,27 @@ matches the converted source page; it is not a global citation, bibliography or
 document-identity pass.
 
 It reads body/table paragraphs and referenced positive footnotes/endnotes,
-including text split across Word runs. Deleted text is ignored and inserted text
-is included. Headers, footers, text boxes, fields, embedded/altChunk content and
+including text split across Word runs. Deleted text and tracked move-from content
+are ignored; inserted and move-to text are included. Headers, footers, text boxes,
+fields, embedded/altChunk content and
 unsupported/unbalanced quote forms are coverage warnings and make the command
 non-success rather than silently claiming coverage. Known unsupported quotation
 delimiters that warn include guillemets (`«»`, `‹›`), German low/high marks
 (`„‚`, `‟‛`), and CJK corner/double-corner marks (`「」`, `『』`, `〝〞〟`). The
 checker does not claim to recognise every quotation or punctuation convention;
-ordinary apostrophes within words remain usable. Inventory prints coverage
+ordinary apostrophes attached to words (including plural possessives) remain usable.
+Single-quote candidates, including unmatched candidates and pairs spanning a line
+or paragraph, are coverage warnings; a word-final ASCII apostrophe without a known
+single-quote opener remains conservatively ambiguous and is treated as a possessive.
+Word's built-in `Quote` and `IntenseQuote` paragraph styles, including derived
+styles and a single default paragraph style, are also reported as unextracted
+coverage rather than verified quotations. Ambiguous multiple defaults warn rather
+than guessing. Inventory prints coverage
 warnings as well as its count, and binding checks carry the same warnings into
 their terminal output and reports. Outputs are new-only.
 For spreadsheet safety, every CSV cell beginning with an apostrophe, `=`, `+`,
 `-`, `@`, tab, or carriage return is prefixed with one apostrophe. The checker
-reverses that prefix when it reads a bindings CSV, so quote hashes and matching
+reverses that prefix when it reads a bindings CSV (including Excel's UTF-8 BOM), so quote hashes and matching
 always use the original text.
 
 Run the bundled offline demonstration with `python3 examples/word/RUN.py --out

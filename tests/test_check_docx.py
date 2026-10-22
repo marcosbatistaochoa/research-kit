@@ -200,6 +200,177 @@ class CheckDocx(unittest.TestCase):
                 expected,
             )
 
+    def test_word_apostrophes_are_not_single_quote_delimiters(self):
+        docx(
+            self.doc,
+            [
+                f"Researchers don't dispute and aren't challenging. The researchers' and authors' results agree. “{QUOTE}”"
+            ],
+        )
+        self.assertEqual(
+            self.toolrun(
+                "--inventory", Path(self.t.name) / "possessive.csv"
+            ).returncode,
+            0,
+        )
+
+    def test_single_quote_candidates_warn_unmatched_and_across_breaks_or_paragraphs(
+        self,
+    ):
+        documents = (
+            f"<w:p><w:r><w:t>“{QUOTE}” ‘invented passage</w:t></w:r></w:p>",
+            f"<w:p><w:r><w:t>“{QUOTE}” ' invented passage</w:t></w:r></w:p>",
+            f"<w:p><w:r><w:t>“{QUOTE}” ‘</w:t></w:r></w:p>",
+            f"<w:p><w:r><w:t>“{QUOTE}” ’</w:t></w:r></w:p>",
+            f"<w:p><w:r><w:t>“{QUOTE}” '</w:t></w:r></w:p>",
+            f"<w:p><w:r><w:t>“{QUOTE}” ‘invented</w:t></w:r><w:r><w:br/></w:r><w:r><w:t>passage’</w:t></w:r></w:p>",
+            f"<w:p><w:r><w:t>“{QUOTE}” ‘invented</w:t></w:r></w:p><w:p><w:r><w:t>passage’</w:t></w:r></w:p>",
+            f"<w:p><w:r><w:t>“{QUOTE}” ' invented</w:t></w:r></w:p><w:p><w:r><w:t>passage'</w:t></w:r></w:p>",
+        )
+        for i, content in enumerate(documents):
+            body = f'<w:document xmlns:w="{W}"><w:body>{content}<w:sectPr/></w:body></w:document>'
+            docx_parts(self.doc, body)
+            result = self.toolrun("--inventory", Path(self.t.name) / f"single-{i}.csv")
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn("unsupported single-quote delimiter", result.stdout)
+
+    def test_bom_bindings_and_moved_or_deleted_content_use_accepted_view(self):
+        body = f'''<w:document xmlns:w="{W}"><w:body><w:p>
+          <w:moveFrom><w:r><w:t>“moved-away quote”</w:t></w:r><w:r><w:fldChar w:fldCharType="begin"/></w:r></w:moveFrom>
+          <w:moveTo><w:r><w:t>“{QUOTE}”</w:t></w:r></w:moveTo>
+          <w:del><w:r><w:instrText>deleted field</w:instrText></w:r></w:del>
+          </w:p><w:sectPr/></w:body></w:document>'''
+        docx_parts(self.doc, body)
+        inv = self.inventory()
+        with inv.open(encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+        self.assertEqual([row["quote"] for row in rows], [QUOTE])
+        for row in rows:
+            row["source_md"], row["page"] = "02_sources/md/lei2023financial.md", "2"
+        bindings = Path(self.t.name) / "bom-bindings.csv"
+        with bindings.open("w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.DictWriter(f, fieldnames=rows[0])
+            writer.writeheader()
+            writer.writerows(rows)
+        self.assertEqual(self.toolrun("--bindings", bindings).returncode, 0)
+
+    def test_quote_styles_and_bad_inheritance_warn_without_suppressing_quotes(self):
+        doc = f'''<w:document xmlns:w="{W}"><w:body>
+          <w:p><w:pPr><w:pStyle w:val="Custom"/></w:pPr><w:r><w:t>undelimited block quote</w:t></w:r></w:p>
+          <w:p><w:r><w:t>“{QUOTE}”</w:t></w:r></w:p><w:sectPr/></w:body></w:document>'''
+        styles = f'''<w:styles xmlns:w="{W}"><w:style w:type="paragraph" w:styleId="Custom"><w:basedOn w:val="Quote"/></w:style></w:styles>'''
+        docx_parts(self.doc, doc, styles=styles)
+        result = self.toolrun("--inventory", Path(self.t.name) / "style.csv")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(
+            "quotation paragraph style 'Custom' is not extracted", result.stdout
+        )
+        doc = doc.replace('w:val="Custom"', 'w:val="Cycle"')
+        styles = f'''<w:styles xmlns:w="{W}"><w:style w:type="paragraph" w:styleId="Cycle"><w:basedOn w:val="Other"/></w:style><w:style w:type="paragraph" w:styleId="Other"><w:basedOn w:val="Cycle"/></w:style></w:styles>'''
+        docx_parts(self.doc, doc, styles=styles)
+        result = self.toolrun("--inventory", Path(self.t.name) / "cycle.csv")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(
+            "cannot resolve paragraph style 'Cycle' conservatively", result.stdout
+        )
+        doc = doc.replace('w:val="Cycle"', 'w:val="Broken"')
+        styles = f'''<w:styles xmlns:w="{W}"><w:style w:type="paragraph" w:styleId="Broken"><w:basedOn/></w:style><w:style w:type="paragraph" w:styleId="Ordinary"/></w:styles>'''
+        docx_parts(self.doc, doc, styles=styles)
+        result = self.toolrun("--inventory", Path(self.t.name) / "broken.csv")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(
+            "cannot resolve paragraph style 'Broken' conservatively", result.stdout
+        )
+
+    def test_default_quote_style_and_long_inheritance_chain_warn_without_traceback(
+        self,
+    ):
+        doc = f'''<w:document xmlns:w="{W}"><w:body>
+          <w:p><w:r><w:t>undelimited default quote</w:t></w:r></w:p>
+          <w:p><w:r><w:t>“{QUOTE}”</w:t></w:r></w:p><w:sectPr/></w:body></w:document>'''
+        styles = f'''<w:styles xmlns:w="{W}"><w:style w:type="paragraph" w:styleId="Quote"/><w:style w:type="paragraph" w:styleId="Custom" w:default="1"><w:basedOn w:val="Quote"/></w:style></w:styles>'''
+        docx_parts(self.doc, doc, styles=styles)
+        result = self.toolrun("--inventory", Path(self.t.name) / "default-style.csv")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn(
+            "quotation paragraph style 'Custom' is not extracted", result.stdout
+        )
+        chain = (
+            "".join(
+                f'<w:style w:type="paragraph" w:styleId="S{i}"><w:basedOn w:val="S{i + 1}"/></w:style>'
+                for i in range(1100)
+            )
+            + '<w:style w:type="paragraph" w:styleId="S1100"><w:basedOn w:val="Quote"/></w:style>'
+        )
+        doc = doc.replace(
+            "<w:p><w:r><w:t>undelimited default quote</w:t></w:r></w:p>",
+            '<w:p><w:pPr><w:pStyle w:val="S0"/></w:pPr><w:r><w:t>undelimited quote</w:t></w:r></w:p>',
+        )
+        styles = f'<w:styles xmlns:w="{W}"><w:style w:type="paragraph" w:styleId="Quote"/>{chain}</w:styles>'
+        docx_parts(self.doc, doc, styles=styles)
+        result = self.toolrun("--inventory", Path(self.t.name) / "long-chain.csv")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertNotIn("RecursionError", result.stderr + result.stdout)
+
+    def test_multiple_default_paragraph_styles_warn(self):
+        doc = f'<w:document xmlns:w="{W}"><w:body><w:p><w:r><w:t>“{QUOTE}”</w:t></w:r></w:p><w:sectPr/></w:body></w:document>'
+        styles = f'''<w:styles xmlns:w="{W}"><w:style w:type="paragraph" w:styleId="Quote" w:default="1"/><w:style w:type="paragraph" w:styleId="Normal" w:default="1"/></w:styles>'''
+        docx_parts(self.doc, doc, styles=styles)
+        result = self.toolrun(
+            "--inventory", Path(self.t.name) / "multiple-defaults.csv"
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("ambiguous multiple default paragraph styles", result.stdout)
+
+    def test_tables_live_headers_and_unsupported_live_content_are_covered(self):
+        table = f'''<w:document xmlns:w="{W}"><w:body><w:tbl><w:tr><w:tc><w:p><w:r><w:t>“{QUOTE}”</w:t></w:r></w:p></w:tc></w:tr></w:tbl><w:sectPr/></w:body></w:document>'''
+        docx_parts(self.doc, table)
+        self.assertEqual(
+            self.toolrun("--inventory", Path(self.t.name) / "table.csv").returncode, 0
+        )
+        for name, content in (
+            (
+                "header1.xml",
+                f'<w:hdr xmlns:w="{W}"><w:p><w:r><w:t>header</w:t></w:r></w:p></w:hdr>',
+            ),
+            (
+                "footer1.xml",
+                f'<w:ftr xmlns:w="{W}"><w:p><w:r><w:t>footer</w:t></w:r></w:p></w:ftr>',
+            ),
+        ):
+            docx_parts(self.doc, table, **{name[:-4]: content})
+            self.assertEqual(
+                self.toolrun(
+                    "--inventory", Path(self.t.name) / (name + ".csv")
+                ).returncode,
+                1,
+            )
+        for name, content in (
+            (
+                "textbox",
+                "<w:txbxContent><w:p><w:r><w:t>hidden</w:t></w:r></w:p></w:txbxContent>",
+            ),
+            ("drawing", "<w:drawing/>"),
+            ("altchunk", '<w:altChunk w:id="rId1"/>'),
+        ):
+            docx(self.doc, [f"“{QUOTE}”"], content)
+            self.assertEqual(
+                self.toolrun(
+                    "--inventory", Path(self.t.name) / (name + ".csv")
+                ).returncode,
+                1,
+            )
+
+    def test_moved_note_references_follow_the_accepted_view(self):
+        body = f'''<w:document xmlns:w="{W}"><w:body><w:p>
+          <w:moveFrom><w:r><w:footnoteReference w:id="99"/></w:r></w:moveFrom>
+          <w:moveTo><w:r><w:footnoteReference w:id="1"/></w:r></w:moveTo>
+          </w:p><w:sectPr/></w:body></w:document>'''
+        notes = f'''<w:footnotes xmlns:w="{W}"><w:footnote w:id="1"><w:p><w:r><w:t>“{QUOTE}”</w:t></w:r></w:p></w:footnote></w:footnotes>'''
+        docx_parts(self.doc, body, footnotes=notes)
+        with self.inventory().open(encoding="utf-8") as f:
+            self.assertEqual(len(list(csv.DictReader(f))), 1)
+
     def test_known_unsupported_quote_delimiters_warn_beside_valid_quote(self):
         for n, unsupported in (
             ("guillemets", "«fabricated passage with five ordinary words»"),
