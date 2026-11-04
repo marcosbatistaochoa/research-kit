@@ -1,6 +1,76 @@
 # Changelog
 
-## Unreleased
+## 0.2.2
+
+### Added
+
+- [Privacy policy](PRIVACY.md), linked from `plugin.json` for the Claude plugin directory
+  listing, with homepage, repository and support links.
+
+### Changed
+
+- The plugin setting `mailto` and the plugin README now say that the address also appears in your
+  session transcript and reaches your model provider. The plugin README lists what the `bin/` tools
+  are and run.
+- The plugin README states the network exceptions: `pandoc` fetching linked images, bibliographies
+  and citation styles, and pipelines running your own code.
+- The `literature-search` skill passes `mailto` in single quotes and leaves it out if it holds
+  anything but letters, digits and `@._+-`. This reduces shell-quoting risk but relies on the
+  assistant following the instruction; an apostrophe in the address would still break the quoting
+  if the instruction is ignored.
+
+## 0.2.1
+
+### Added
+
+- Plugin icon (`.claude-plugin/icon.png`, source `assets/icon.svg`, rebuilt by `tools/icon/render.sh`)
+  for the Claude plugin directory listing.
+
+### Breaking changes (upgrading from 0.2.0)
+
+`lit-search` reads no API keys or contact details from the environment. The plugin directory
+flags reading a credential from the user's machine.
+
+- `SEMANTIC_SCHOLAR_API_KEY` is no longer read and Semantic Scholar API-key support is removed.
+  Semantic Scholar is queried anonymously and may rate-limit; receipts show partial coverage.
+- `LIT_SEARCH_MAILTO` is no longer read. The contact email is now the plugin setting `mailto`
+  (`userConfig` in `plugin.json`), passed by the skill as `--mailto`; the CLI also accepts
+  `--mailto EMAIL` directly. Set it with `/plugin configure provenote@provenote`.
+
+### Fixed
+
+- The receipt records `mailto` only for OpenAlex, the one index that receives it; the Semantic
+  Scholar entry no longer carries it.
+- When snowballing leaves OpenAlex DEGRADED, the receipt `status` is now `partial` instead of
+  `ok`. The exit code is unchanged.
+- A `--mailto` value that is still an unsubstituted placeholder (starting with `${`) is treated as
+  unset: it is not sent and the receipt says `unset`.
+
+## 0.2.0
+
+### Renamed
+
+The project is now **Provenote** (plugin ID, marketplace and repository: `provenote`; formerly
+`research-kit`). The old repository URL redirects, but plugin and marketplace IDs do not. To
+migrate in Claude Code:
+
+```text
+/plugin uninstall research-kit@research-kit
+/plugin marketplace remove research-kit
+/plugin marketplace add nik110403/provenote
+/plugin install provenote@provenote
+```
+
+Skills and agents are now namespaced `provenote:` instead of `research-kit:`. For Codex, delete the
+old `<project>/.agents/skills/research-kit/` folder and install the adapter again into
+`<project>/.agents/skills/provenote/` ([INSTALL.md](INSTALL.md#upgrading-from-research-kit)); invoke it
+as `$provenote`. Scripts that call `plugins/research-kit/bin/...` must use `plugins/provenote/bin/...`.
+The denylist environment variable for `scripts/leak-check.sh` is now `PROVENOTE_DENYLIST` (default file
+`~/.config/provenote/denylist`).
+
+### Changed
+- README restructured around install, a demo and a 30-second example; the full tool table is folded
+  into a collapsible section. [INSTALL.md](INSTALL.md) gains an "Install the external tools" section.
 
 ### Fixed
 
@@ -11,6 +81,19 @@
 
 ### Added
 
+- Animated README and landing-page demo built from one real Claude Code run on a small demo project
+  (`assets/demo-light.svg`, `assets/demo-dark.svg`); `tools/demo/` holds the captured transcript, the
+  stdlib-only renderer and the fixture, so it can be regenerated.
+- `scripts/install-deps.sh` (macOS Homebrew, Debian/Ubuntu apt, Fedora dnf) and `scripts/install-deps.ps1`
+  (Windows winget, Chocolatey fallback) install Poppler and pandoc, optionally Typst, then run `doctor`;
+  `--dry-run` / `-DryRun` previews. CI runs them in dry-run mode.
+- GitHub Pages landing page under `site/` and a `pages` workflow that assembles and deploys it.
+- `SECURITY.md` (how to report a vulnerability).
+- `.github/RELEASE_NOTES_TEMPLATE.md` for release notes.
+- `tribunal` skill, `tribune` and `refuter` agents, and the `tribunal-scribe` tool: a sealed, multi-lens
+  review of a costly decision with a verbatim, hash-chained record. Ported from the
+  [ai-architecture](https://github.com/nik110403/ai-architecture) collection; the record tool and its
+  tests run, the panel procedure is instructions for the assistant.
 - `build-paper --to docx --reference-doc PATH` applies a user-maintained pandoc style reference without
   changing it; [Word export](docs/word-export.md) documents this one-way output and its limits.
 - The portable smoke test now exports a styled DOCX and runs the no-Zotero Word binding demonstration in

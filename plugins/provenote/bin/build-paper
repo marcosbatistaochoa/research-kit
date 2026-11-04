@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+"""Build a provenote paper with pandoc and conservative post-build guards."""
+import argparse
+import os
+import re
+import shutil
+import subprocess
+import sys
+import zipfile
+import json
+from pathlib import Path
+
+
+# Optional layout file provenote.json: keys below, paths relative to the folder holding it.
+# No file: Nik's numbered layout. Unknown keys and absolute or ".." paths are refused.
+LAYOUT = {"notes": "01_notes/lit", "search": "01_notes/search", "sources_md": "02_sources/md",
+          "sources_pdf": "02_sources/pdf", "manifest": "02_sources/manifest.csv",
+          "bib": "07_references/references.bib", "paper_dir": "10_paper"}
+
+
+def find_layout(start="."):
+    """(folder holding provenote.json or None, layout). Walks up from start (a path is read, never listed)."""
+    here = Path(os.path.abspath(start))
+    for d in (here, *here.parents):
+        f = d / "provenote.json"
+        if not f.is_file():
+            continue
+        try:
+            data = json.loads(f.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError) as e:
+            raise SystemExit(f"{f}: cannot read layout file ({e})")
+        bad = [k for k, v in (data.items() if isinstance(data, dict) else [("<file>", None)])
+               if k not in LAYOUT or not isinstance(v, str) or not v.strip()
+               or Path(v).is_absolute() or ".." in Path(v).parts]
+        if bad:
+            raise SystemExit(f"{f}: bad layout entries {bad}; allowed keys {sorted(LAYOUT)}, "
+                             "each a relative path without '..'")
+        return d, {**LAYOUT, **data}
+    return None, dict(LAYOUT)
+
+
+def layout_path(key, start="."):
+    """Path string for a layout key: relative as before without a layout file, else under its folder."""
+    base, lay = find_layout(start)
+    return str(base / lay[key]) if base else lay[key]
+
+
+def command_version(command):
+    result = subprocess.run([command, "--version"], capture_output=True, text=True,
+                            encoding="utf-8", errors="replace")
+    return result.stdout.splitlines()[0] if result.stdout else command
+
+
+def aliases(first, second):
+    """Return whether two existing paths name the same filesystem object."""
+    try:
+        return os.path.samefile(first, second)
+    except OSError:
+        return False
+
+
+def main():
+    for _s in (sys.stdout, sys.stderr):  # UTF-8 output regardless of the locale (e.g. Windows cp1252)
+        try:
+            _s.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError, OSError):
+            pass
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--soft", action="store_true", help="report guard failures but exit zero")
+    parser.add_argument("--to", choices=("html", "pdf", "docx"), default="pdf",
+                        help="requested output (default: pdf; HTML fallback if no PDF engine)")
+    parser.add_argument("--reference-doc", metavar="PATH",
+                        help="DOCX style reference document (only with --to docx)")
+    parser.add_argument("--grounding", action="store_true",
+                        help="also run quote and citation checks; this is not full-draft proof")
+    parser.add_argument("paper_dir", nargs="?", help="paper folder (default: layout paper_dir, 10_paper)")
+    args = parser.parse_args()
+    if args.reference_doc and args.to != "docx":
+        parser.error("--reference-doc is only supported with --to docx")
+    reference_doc = None
+    if args.reference_doc:
+        reference_doc = Path(args.reference_doc).expanduser().resolve()
+        if not reference_doc.exists():
+            parser.error(f"--reference-doc not found: {reference_doc}")
+        if not reference_doc.is_file():
+            parser.error(f"--reference-doc must be a file: {reference_doc}")
+    base, lay = find_layout(args.paper_dir or ".")
+    paper_dir = Path(args.paper_dir or layout_path("paper_dir")).resolve()
+    paper = paper_dir / "paper.md"
+    if not paper.is_file():
+        parser.error(f"{paper} not found")
+    if not shutil.which("pandoc"):
+        print("build-paper: pandoc not found on PATH", file=sys.stderr)
+        return 2
+
+    requested = args.to
+    actual = requested
+    pandoc_args = ["pandoc", "--citeproc"]
+    if requested == "pdf":
+        if shutil.which("typst"):
+            pandoc_args.append("--pdf-engine=typst")
+            engine = "typst"
+        elif shutil.which("xelatex"):
+            pandoc_args.append("--pdf-engine=xelatex")
+            engine = "xelatex"
+        else:
+            actual, engine = "html", "absent; building HTML instead of PDF"
+            pandoc_args.append("--standalone")
+    elif requested == "html":
+        engine = "HTML"
+        pandoc_args.append("--standalone")
+    else:
+        engine = "pandoc docx writer"
+    metadata = paper_dir / "metadata.yaml"
+    if metadata.is_file():
+        pandoc_args.append("--metadata-file=metadata.yaml")
+    output = paper_dir / f"paper.{actual}"
+    log = paper_dir / "build.log"
+    if reference_doc and (aliases(reference_doc, output) or aliases(reference_doc, log)):
+        parser.error("--reference-doc must not alias a build output (paper.docx or build.log)")
+    log.write_text(f"pandoc: {command_version('pandoc')}\nengine: {engine}\n", encoding="utf-8")
+    print(log.read_text(encoding="utf-8"), end="")
+    if reference_doc:
+        pandoc_args.append(f"--reference-doc={reference_doc}")
+    result = subprocess.run([*pandoc_args, "-o", output.name, paper.name], cwd=paper_dir,
+                            capture_output=True, text=True, encoding="utf-8", errors="replace")
+    with log.open("a", encoding="utf-8") as handle:
+        handle.write(result.stdout)
+        handle.write(result.stderr)
+
+    failures = []
+    log_text = log.read_text(encoding="utf-8", errors="replace")
+    if result.returncode:
+        failures.append(f"pandoc exited {result.returncode}")
+    if re.search(r"citation .* not found|Citeproc:.*not found", log_text, re.I):
+        failures.append("unresolved citations (see build.log)")
+    if re.search(r"Could not fetch resource|File .* not found|could not find|Cannot find", log_text, re.I):
+        failures.append("missing include/image file (see build.log)")
+    missing = [match.group(1) for match in re.finditer(r"!\[[^]]*\]\(([^ )\"]+)", paper.read_text(encoding="utf-8"))
+               if not match.group(1).startswith(("http://", "https://")) and not (paper_dir / match.group(1)).exists()]
+    if missing:
+        failures.append("missing file(s): " + ", ".join(missing))
+    if "???" in paper.read_text(encoding="utf-8"):
+        failures.append("??? found in paper.md")
+    if output.is_file() and actual == "html" and "???" in output.read_text(encoding="utf-8", errors="replace"):
+        failures.append("??? found in paper.html")
+    if output.is_file() and actual == "docx":
+        with zipfile.ZipFile(output) as archive:
+            if "???" in archive.read("word/document.xml").decode("utf-8", errors="replace"):
+                failures.append("??? found in paper.docx")
+    if actual == "pdf" and output.is_file() and shutil.which("pdftotext"):
+        text = subprocess.run(["pdftotext", str(output), "-"], capture_output=True, text=True,
+                              encoding="utf-8", errors="replace").stdout
+        if "???" in text:
+            failures.append("??? found in paper.pdf")
+    if args.grounding:
+        root = base or paper_dir.parent
+        notes = sorted((root / lay["notes"]).glob("*.md"))
+        if not notes:
+            failures.append(f"grounding: no notes in {lay['notes']}")
+        else:
+            for helper_args in (("verify-quotes", "--strict", *map(str, notes)),
+                                ("check-claims", "--root", str(root), str(paper))):
+                helper = Path(__file__).resolve().parent / helper_args[0]
+                check = subprocess.run([sys.executable, str(helper), *helper_args[1:]], cwd=root,
+                                       capture_output=True, text=True, encoding="utf-8", errors="replace")
+                with log.open("a", encoding="utf-8") as handle:
+                    handle.write(check.stdout + check.stderr)
+                if check.returncode:
+                    failures.append(f"grounding: {helper_args[0]} failed")
+    if failures:
+        print("build-paper: guard FAILED:\n" + "\n".join(failures), file=sys.stderr)
+        if args.soft:
+            print("build-paper: --soft, exiting 0", file=sys.stderr)
+            return 0
+        return 1
+    print(f"build-paper: OK -> {output}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

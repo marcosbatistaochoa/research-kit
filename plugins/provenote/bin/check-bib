@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+"""Check a BibTeX file and its use in a pandoc-markdown paper.
+
+Usage: check-bib [references.bib] [paper.md]
+Defaults: 07_references/references.bib and 10_paper/paper.md (run from the project root), or the
+paths in provenote.json (layout keys bib, paper_dir).
+
+Errors (exit 1): duplicate keys; entries missing author/editor, title or year; malformed DOI
+(expected 10.NNNN+/suffix); keys cited in the paper but absent from the .bib.
+Notes (exit 0): keys present in the .bib but never cited. Exit 2 on usage error.
+"""
+from __future__ import annotations
+
+import sys
+
+if sys.version_info < (3, 9):
+    sys.exit("check-bib needs Python 3.9 or newer")
+
+import re
+import json
+import os
+from pathlib import Path
+
+DOI_RE = re.compile(r"^10\.\d{4,9}/\S+$")
+CITE_RE = re.compile(r"(?<![\w.@])@\{?([A-Za-z0-9_][\w:.#$%&+?<>~/-]*)")
+SKIP_TYPES = {"comment", "string", "preamble"}
+
+
+# Optional layout file provenote.json: keys below, paths relative to the folder holding it.
+# No file: Nik's numbered layout. Unknown keys and absolute or ".." paths are refused.
+LAYOUT = {"notes": "01_notes/lit", "search": "01_notes/search", "sources_md": "02_sources/md",
+          "sources_pdf": "02_sources/pdf", "manifest": "02_sources/manifest.csv",
+          "bib": "07_references/references.bib", "paper_dir": "10_paper"}
+
+
+def find_layout(start="."):
+    """(folder holding provenote.json or None, layout). Walks up from start (a path is read, never listed)."""
+    here = Path(os.path.abspath(start))
+    for d in (here, *here.parents):
+        f = d / "provenote.json"
+        if not f.is_file():
+            continue
+        try:
+            data = json.loads(f.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError) as e:
+            raise SystemExit(f"{f}: cannot read layout file ({e})")
+        bad = [k for k, v in (data.items() if isinstance(data, dict) else [("<file>", None)])
+               if k not in LAYOUT or not isinstance(v, str) or not v.strip()
+               or Path(v).is_absolute() or ".." in Path(v).parts]
+        if bad:
+            raise SystemExit(f"{f}: bad layout entries {bad}; allowed keys {sorted(LAYOUT)}, "
+                             "each a relative path without '..'")
+        return d, {**LAYOUT, **data}
+    return None, dict(LAYOUT)
+
+
+def layout_path(key, start="."):
+    """Path string for a layout key: relative as before without a layout file, else under its folder."""
+    base, lay = find_layout(start)
+    return str(base / lay[key]) if base else lay[key]
+
+
+def parse_bib(text: str):
+    """Return [(key, {field: value})] in file order."""
+    entries = []
+    for m in re.finditer(r"@(\w+)\s*([{(])", text):
+        etype = m.group(1).lower()
+        if etype in SKIP_TYPES:
+            continue
+        i, depth = m.end(), 1
+        while i < len(text) and depth:
+            depth += {"{": 1, "}": -1}.get(text[i], 0)
+            i += 1
+        body = text[m.end():i - 1]
+        key, _, rest = body.partition(",")
+        fields = {}
+        for fm in re.finditer(r"(\w+)\s*=\s*", rest):
+            j = fm.end()
+            if j >= len(rest):
+                continue
+            if rest[j] == "{":
+                d, k = 1, j + 1
+                while k < len(rest) and d:
+                    d += {"{": 1, "}": -1}.get(rest[k], 0)
+                    k += 1
+                val = rest[j + 1:k - 1]
+            elif rest[j] == '"':
+                k = rest.find('"', j + 1)
+                val = rest[j + 1:k if k > 0 else len(rest)]
+            else:
+                val = re.match(r"[^,\s]*", rest[j:]).group(0)
+            fields.setdefault(fm.group(1).lower(), val.strip())
+        entries.append((key.strip(), fields))
+    return entries
+
+
+def cited_keys(md: str) -> set:
+    md = re.sub(r"<!--.*?-->", "", md, flags=re.S)
+    md = re.sub(r"```.*?```", "", md, flags=re.S)
+    return {k.rstrip(".:;,") for k in CITE_RE.findall(md)}
+
+
+def main(argv) -> int:
+    for _s in (sys.stdout, sys.stderr):  # UTF-8 output regardless of the locale (e.g. Windows cp1252)
+        try:
+            _s.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError, OSError):
+            pass
+    if any(a in ("-h", "--help") for a in argv):
+        print(__doc__ + "Requires: python3 >= 3.9 (stdlib only).")
+        return 0
+    if len(argv) > 2:
+        print(__doc__)
+        return 2
+    bib = Path(argv[0] if argv else layout_path("bib"))
+    paper = Path(argv[1] if len(argv) > 1 else Path(layout_path("paper_dir")) / "paper.md")
+    if not bib.is_file():
+        print(f"check-bib: no such file: {bib}", file=sys.stderr)
+        return 2
+    entries = parse_bib(bib.read_text(encoding="utf-8"))
+    errors, seen = [], set()
+    for key, f in entries:
+        if key in seen:
+            errors.append(f"duplicate key: {key}")
+        seen.add(key)
+        if not (f.get("author") or f.get("editor")):
+            errors.append(f"{key}: missing author")
+        for name in ("title", "year"):
+            if not f.get(name):
+                errors.append(f"{key}: missing {name}")
+        doi = f.get("doi")
+        if doi is not None:
+            d = doi.strip()
+            if not DOI_RE.match(d):
+                errors.append(f"{key}: malformed DOI {doi!r} (expected bare 10.NNNN/suffix)")
+    notes = []
+    if paper.is_file():
+        cited = cited_keys(paper.read_text(encoding="utf-8"))
+        for k in sorted(cited - seen):
+            errors.append(f"cited but not in bib: {k}")
+        for k in sorted(seen - cited):
+            notes.append(f"in bib but never cited: {k}")
+    else:
+        notes.append(f"{paper} not found; skipped cited/uncited comparison")
+    for e in errors:
+        print(f"ERROR {e}")
+    for n in notes:
+        print(f"NOTE  {n}")
+    print(f"{len(entries)} entries, {len(errors)} errors, {len(notes)} notes")
+    return 1 if errors else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

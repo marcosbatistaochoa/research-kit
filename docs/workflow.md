@@ -22,10 +22,10 @@ root as the working directory for default research commands; run analysis from
 the pipeline directory. Link results into the paper through a deliberate build
 step rather than treating a successful analysis run as a paper rebuild.
 
-## Folder layout: research-kit.json
+## Folder layout: provenote.json
 
 The tables and skills use Nik's numbered folders. A project that keeps its files elsewhere puts an
-optional `research-kit.json` in its root. The tools find it by walking up from the note, the working
+optional `provenote.json` in its root. The tools find it by walking up from the note, the working
 directory or `--root`; paths are relative to the folder holding the file, and any key left out keeps
 its default. Without the file nothing changes. Explicit flags (`--root`, `--out`, `--bib`, a paper
 path) win over the file. `new-project` always scaffolds the default layout.

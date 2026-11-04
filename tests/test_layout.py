@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_pdf2md import make_pdf  # noqa: E402
 
-BIN = Path(__file__).resolve().parent.parent / "plugins/research-kit/bin"
+BIN = Path(__file__).resolve().parent.parent / "plugins/provenote/bin"
 SOURCE = ("---\ntitle: T\n---\n<!-- page 1 -->\nMoney is a social convention that evolved over many "
           "centuries of trade.\n")
 NOTE = ('---\ncitekey: a\nsource_md: {src}/a.md\nclaims:\n  - "A claim."\nquotes:\n  - page: 1\n'
@@ -50,7 +50,7 @@ class Project(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
-        (self.root / "research-kit.json").write_text(json.dumps(LAYOUT), encoding="utf-8")
+        (self.root / "provenote.json").write_text(json.dumps(LAYOUT), encoding="utf-8")
         for d in ("notes/lit2", "src/md", "refs", "draft"):
             (self.root / d).mkdir(parents=True)
         (self.root / "src/md/a.md").write_text(SOURCE, encoding="utf-8")
@@ -97,13 +97,13 @@ class VerifyQuotesLayout(Project):
         self.assertIn("differs from the md front matter", r.stdout)
 
     def test_bad_layout_file_is_a_clear_error(self):
-        (self.root / "research-kit.json").write_text('{"notes": "/abs", "typo": "x"}', encoding="utf-8")
+        (self.root / "provenote.json").write_text('{"notes": "/abs", "typo": "x"}', encoding="utf-8")
         r = run("verify-quotes", str(self.note))
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("bad layout entries", r.stderr)
 
     def test_no_layout_file_keeps_default_layout(self):
-        (self.root / "research-kit.json").unlink()
+        (self.root / "provenote.json").unlink()
         (self.root / "01_notes/lit").mkdir(parents=True)
         (self.root / "02_sources/md").mkdir(parents=True)
         (self.root / "02_sources/md/a.md").write_text(SOURCE, encoding="utf-8")

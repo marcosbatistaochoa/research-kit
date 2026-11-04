@@ -12,9 +12,10 @@ HOME_PATH = "/ho" + "me/x/notes"  # built in pieces so this file is itself clean
 IP = "10.1." + "2.3"
 EMAIL = "jane@" + "example.org"
 PUBLIC_HANDLE = "nik" + "110403"
+AUTHOR_FAMILY = "Khosravi" + "pour"
 PUBLIC_URLS = tuple(
     "https://github.com/" + PUBLIC_HANDLE + "/" + repo
-    for repo in ("research-kit", "ai-architecture")
+    for repo in ("provenote", "ai-architecture")
 )
 PUBLIC_DOCS = (
     "README.md",
@@ -135,7 +136,7 @@ class LeakCheck(unittest.TestCase):
         self.git("add", "f.txt")
         env = dict(
             os.environ,
-            RESEARCH_KIT_DENYLIST=str(
+            PROVENOTE_DENYLIST=str(
                 self.deny if deny else self.tmp.name + "/missing"
             ),
         )
@@ -175,7 +176,7 @@ class LeakCheck(unittest.TestCase):
         self.assertEqual(self.run_check("clean").returncode, 1)
 
     def test_author_lines_exempt_only_in_metadata(self):
-        env = dict(os.environ, RESEARCH_KIT_DENYLIST=str(self.deny))
+        env = dict(os.environ, PROVENOTE_DENYLIST=str(self.deny))
 
         def check(name, content):
             (self.repo / name).write_text(content + "\n", encoding="utf-8")
@@ -196,14 +197,173 @@ class LeakCheck(unittest.TestCase):
         self.assertEqual(check("LICENSE", "Thanks to SecretProject"), 1)
         self.assertEqual(check("README.md", "Copyright (c) 2026 SecretProject"), 1)
         self.assertEqual(
-            check("README.md", "/plugin marketplace add SecretProject/research-kit"), 0
+            check("README.md", "/plugin marketplace add SecretProject/provenote"), 0
         )
-        self.assertEqual(check("README.md", "see SecretProject/research-kit"), 1)
+        self.assertEqual(check("README.md", "see SecretProject/provenote"), 1)
+
+    def test_citation_metadata_allowed_on_exact_lines_only(self):
+        self.deny.write_text(
+            "secretproject\n" + PUBLIC_HANDLE + "\n" + AUTHOR_FAMILY.lower() + "\n",
+            encoding="utf-8",
+        )
+        env = dict(os.environ, PROVENOTE_DENYLIST=str(self.deny))
+        family = '  - family-names: "' + AUTHOR_FAMILY + '"'
+        creators = '  "creators": [{ "name": "' + AUTHOR_FAMILY + ', Nik" }],'
+        repo_line = 'repository-code: "https://github.com/' + PUBLIC_HANDLE + '/provenote"'
+        url_line = 'url: "https://' + PUBLIC_HANDLE + '.github.io/provenote/"'
+        for name, text, want in (
+            ("CITATION.cff", family, 0),
+            ("CITATION.cff", family + " # x", 1),
+            ("CITATION.cff", '  - family-names: "Secretproject"', 1),
+            ("CITATION.cff", 'title: "' + AUTHOR_FAMILY + '"', 1),
+            ("CITATION.cff", repo_line, 0),
+            ("CITATION.cff", url_line, 0),
+            ("CITATION.cff", repo_line.replace("provenote", "secretproject"), 1),
+            (".zenodo.json", creators, 0),
+            (".zenodo.json", '  "creators": [{ "name": "Secretproject, Nik" }],', 1),
+            (".zenodo.json", creators.replace("Nik", "Secretproject"), 1),
+            ("README.md", family, 1),
+            (
+                "plugins/provenote/README.md",
+                "https://github.com/" + PUBLIC_HANDLE + "/provenote secretproject",
+                1,
+            ),
+            (
+                "plugins/provenote/.claude-plugin/plugin.json",
+                '  "supportUrl": "https://github.com/' + PUBLIC_HANDLE + '/provenote/issues",',
+                0,
+            ),
+            (
+                "plugins/provenote/.claude-plugin/plugin.json",
+                '  "supportUrl": "https://github.com/' + PUBLIC_HANDLE + '/provenote/issues", secretproject',
+                1,
+            ),
+            (
+                "plugins/provenote/.claude-plugin/plugin.json",
+                '  "homepage": "https://' + PUBLIC_HANDLE + '.github.io/provenote/",',
+                0,
+            ),
+            (
+                "plugins/provenote/.claude-plugin/plugin.json",
+                '  "homepage": "https://' + PUBLIC_HANDLE + '.github.io/provenote/", secretproject',
+                1,
+            ),
+            (
+                "plugins/provenote/.claude-plugin/plugin.json",
+                '  "repository": "https://github.com/' + PUBLIC_HANDLE + '/provenote",',
+                0,
+            ),
+            (
+                "plugins/provenote/.claude-plugin/plugin.json",
+                '  "repository": "https://github.com/' + PUBLIC_HANDLE + '/provenote", secretproject',
+                1,
+            ),
+            (
+                "plugins/provenote/.claude-plugin/plugin.json",
+                '  "privacyPolicyUrl": "https://github.com/' + PUBLIC_HANDLE + '/provenote/blob/main/PRIVACY.md",',
+                0,
+            ),
+            (
+                "plugins/provenote/.claude-plugin/plugin.json",
+                '  "privacyPolicyUrl": "https://github.com/' + PUBLIC_HANDLE + '/provenote/blob/main/PRIVACY.md", secretproject',
+                1,
+            ),
+            (
+                "plugins/provenote/README.md",
+                "[privacy policy](https://github.com/" + PUBLIC_HANDLE + "/provenote/blob/main/PRIVACY.md).",
+                0,
+            ),
+            (
+                "plugins/provenote/README.md",
+                "[privacy policy](https://github.com/" + PUBLIC_HANDLE + "/provenote/blob/main/PRIVACY.md). secretproject",
+                1,
+            ),
+            (
+                "PRIVACY.md",
+                "Questions: open an [issue](https://github.com/" + PUBLIC_HANDLE
+                + "/provenote/issues). For a privacy or security",
+                0,
+            ),
+            (
+                "PRIVACY.md",
+                "Questions: open an [issue](https://github.com/" + PUBLIC_HANDLE
+                + "/provenote/issues). For a privacy or security secretproject",
+                1,
+            ),
+        ) + (
+            # a crafted colon-prefixed path no longer gets the allowance (POSIX only)
+            ()
+            if os.name == "nt"
+            else (
+                (
+                    "x:PRIVACY.md",
+                    "Questions: open an [issue](https://github.com/" + PUBLIC_HANDLE
+                    + "/provenote/issues). For a privacy or security",
+                    1,
+                ),
+                (
+                    "ab:PRIVACY.md",
+                    "Questions: open an [issue](https://github.com/" + PUBLIC_HANDLE
+                    + "/provenote/issues). For a privacy or security",
+                    1,
+                ),
+            )
+        ):
+            (self.repo / name).parent.mkdir(parents=True, exist_ok=True)
+            (self.repo / name).write_text(text + "\n", encoding="utf-8")
+            self.git("add", name)
+            r = subprocess.run(
+                [BASH, str(SCRIPT)],
+                cwd=self.repo,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            self.git("rm", "-q", "--cached", name)
+            self.assertEqual(r.returncode, want, (name, text, r.stderr))
+
+    def test_directory_listing_allowances_in_history(self):
+        self.deny.write_text("secretproject\n" + PUBLIC_HANDLE + "\n", encoding="utf-8")
+        env = dict(os.environ, PROVENOTE_DENYLIST=str(self.deny))
+        pj = "plugins/provenote/.claude-plugin/plugin.json"
+        base = "https://github.com/" + PUBLIC_HANDLE + "/provenote"
+        exact = (
+            (pj, '  "homepage": "https://' + PUBLIC_HANDLE + '.github.io/provenote/",'),
+            (pj, '  "repository": "' + base + '",'),
+            (pj, '  "supportUrl": "' + base + '/issues",'),
+            (pj, '  "privacyPolicyUrl": "' + base + '/blob/main/PRIVACY.md",'),
+            ("plugins/provenote/README.md", "[privacy policy](" + base + "/blob/main/PRIVACY.md)."),
+            ("PRIVACY.md", "Questions: open an [issue](" + base + "/issues). For a privacy or security"),
+        )
+        self.git("commit", "-q", "--allow-empty", "-m", "base")
+        for name, line in exact:
+            for suffix, want in (("", 0), (" secretproject", 1)):
+                with self.subTest(name=name, suffix=suffix):
+                    (self.repo / name).parent.mkdir(parents=True, exist_ok=True)
+                    base_commit = subprocess.run(
+                        ["git", "rev-parse", "HEAD"], cwd=self.repo, check=True, capture_output=True, text=True
+                    ).stdout.strip()
+                    (self.repo / name).write_text(line + suffix + "\n", encoding="utf-8")
+                    self.git("add", name)
+                    self.git("commit", "-qm", "fixture")
+                    r = subprocess.run(
+                        [BASH, str(SCRIPT), "--history"],
+                        cwd=self.repo,
+                        env=env,
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                    )
+                    self.assertEqual(r.returncode, want, r.stdout + r.stderr)
+                    self.git("reset", "-q", "--hard", base_commit)
 
     def test_banner_footer_default_allowed_on_exact_line_only(self):
         line = '    p.add_argument("--footer", default="secretproject.com")'
         self.deny.write_text("secretproject\n", encoding="utf-8")
-        env = dict(os.environ, RESEARCH_KIT_DENYLIST=str(self.deny))
+        env = dict(os.environ, PROVENOTE_DENYLIST=str(self.deny))
         for name, text, want in (
             ("tools/banner/bin/make-banner", line, 0),
             ("tools/banner/bin/make-banner", line + " # secretproject", 1),
@@ -261,7 +421,7 @@ class LeakCheck(unittest.TestCase):
         self.git("commit", "-qm", "x")
         (self.repo / "f.txt").write_text("clean\n", encoding="utf-8")
         self.git("commit", "-qam", "y")
-        env = dict(os.environ, RESEARCH_KIT_DENYLIST=str(self.deny))
+        env = dict(os.environ, PROVENOTE_DENYLIST=str(self.deny))
         run = lambda m: subprocess.run(
             [BASH, str(SCRIPT), m],
             cwd=self.repo,
@@ -282,7 +442,7 @@ class LeakCheck(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content + "\n", encoding="utf-8")
         self.git("add", name)
-        env = dict(os.environ, RESEARCH_KIT_DENYLIST=str(self.deny))
+        env = dict(os.environ, PROVENOTE_DENYLIST=str(self.deny))
         try:
             result = subprocess.run(
                 [BASH, str(SCRIPT), mode],
@@ -329,6 +489,62 @@ class LeakCheck(unittest.TestCase):
                     self.check_reference("README.md", url + suffix, 1, kind="denylist")
             self.check_reference("README.md", "x" + url, 1, kind="denylist")
 
+    def site_page_case(self, content, expected):
+        self.check_reference(
+            "site/index.html", content, expected, kind="denylist" if expected else None
+        )
+
+    def test_site_page_allowances_are_anchored(self):
+        owner = PUBLIC_HANDLE
+        base = "https://github.com/" + owner + "/provenote"
+        install = "    <pre><code>/plugin marketplace add " + owner + "/provenote</code></pre>"
+        # accepted forms
+        self.site_page_case('<a href="' + base + '">x</a>', 0)
+        self.site_page_case('<a href="' + base + '/blob/main/docs/verification.md">x</a>', 0)
+        self.site_page_case(install, 0)
+        # trailing content after the install line, wrong owner, path tricks
+        self.site_page_case(install + '<a href="https://github.com/' + owner + '/privatefixtureword">x</a>', 1)
+        self.site_page_case(install + " privatefixtureword", 1)
+        self.site_page_case(
+            "    <pre><code>/plugin marketplace add privatefixtureword/provenote</code></pre>", 1
+        )
+        for tail in (
+            "/blob/main/../../privatefixtureword",
+            "/blob/main/privatefixtureword/notes.md",
+            "/blob/main/PRIVATEFIXTUREWORD/notes.md",
+            "/tree/main//privatefixtureword",
+            "-privatefixtureword",
+            "/privatefixtureword",
+        ):
+            with self.subTest(tail=tail):
+                self.site_page_case('<a href="' + base + tail + '">x</a>', 1)
+        self.site_page_case(
+            '<A HREF="' + base.upper().replace("HTTPS", "https") + "/BLOB/MAIN/PRIVATEFIXTUREWORD" + '">x</A>', 1
+        )
+        self.site_page_case('<a href="' + base + '">x</a> privatefixtureword', 1)
+        self.site_page_case('<a href="x' + base + '">x</a>', 1)
+        # the allowances apply to the exact file label only
+        for name in ("docs/site/index.html", "a/site/index.html", "site/index.html.bak"):
+            with self.subTest(name=name):
+                self.check_reference(name, '<a href="' + base + '">x</a>', 1, kind="denylist")
+
+    def test_site_pages_url_allowance_is_anchored(self):
+        owner = PUBLIC_HANDLE
+        pages = "https://" + owner + ".github.io/provenote/"
+        self.site_page_case('<link rel="canonical" href="' + pages + '">', 0)
+        self.site_page_case('<meta property="og:image" content="' + pages + 'social-preview.png">', 0)
+        self.check_reference("README.md", pages, 1, kind="denylist")
+        for bad in (
+            "see " + pages,
+            "https://" + owner + ".github.io/other/",
+            pages + "privatefixtureword.png",
+            "https://" + owner + ".github.io.evil.com/provenote/",
+            "https://x" + owner + ".github.io/provenote/",
+        ):
+            with self.subTest(bad=bad):
+                self.site_page_case('<a href="' + bad + '">x</a>' if "see" not in bad else bad, 1)
+        self.site_page_case('<a href="' + pages + '">' + owner + "</a>", 1)
+
     def test_public_urls_unexpected_files_are_denied(self):
         for name in ("other.md", "nested/README.md", "docs/other.md"):
             for url in PUBLIC_URLS:
@@ -346,7 +562,7 @@ class LeakCheck(unittest.TestCase):
                     self.check_reference("INSTALL.md", url + " " + value, 1, kind=kind)
 
     def test_install_exact_marketplace_command(self):
-        command = "/plugin marketplace add " + PUBLIC_HANDLE + "/research-kit"
+        command = "/plugin marketplace add " + PUBLIC_HANDLE + "/provenote"
         self.check_reference("INSTALL.md", command, 0)
         self.check_reference(
             "INSTALL.md", command + " privatefixtureword", 1, kind="denylist"

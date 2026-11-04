@@ -1,6 +1,6 @@
 # Using the collection with other assistants
 
-The native packaged route is the Claude Code plugin: seven skills and four
+The native packaged route is the Claude Code plugin: eight skills and six
 Claude-format roles. The command-line tools also run without any assistant.
 For another assistant, distinguish **manual workflow adaptation** from **native
 skill discovery**. Neither imports Claude's agent permissions automatically.
@@ -8,7 +8,7 @@ skill discovery**. Neither imports Claude's agent permissions automatically.
 ## Manual workflow and role adaptation
 
 1. Choose a stage from the [catalog](../CATALOG.md). Read its `SKILL.md`, support
-   assets and required role contracts from `plugins/research-kit/`.
+   assets and required role contracts from `plugins/provenote/`.
 2. Give the assistant the actual project paths and absolute tool paths. Translate
    commands to the available terminal interface; run them from the research
    project root, or from the pipeline directory for `run_all.py` / `run_all.R`.
@@ -42,7 +42,7 @@ documentation before relying on a path in a different version.
 
 For Codex, use `python3 scripts/install-codex.py --project <project-dir>` (or
 `python .\scripts\install-codex.py --project <project-dir>` in PowerShell). It
-copies a self-contained `.agents/skills/research-kit/` with helpers, templates,
+copies a self-contained `.agents/skills/provenote/` with helpers, templates,
 workflow assets and role contracts. It neither creates nor overwrites `AGENTS.md`.
 Discovery makes instructions available; it does not import Claude permissions.
 
@@ -55,9 +55,16 @@ Discovery makes instructions available; it does not import Claude permissions.
 - Notes require the local note template, `source-reader` contract and
   `verify-quotes`. Review requires `verify-quotes`, `check-claims`,
   `claim-checker` and `skeptic`. `check-bib` remains a separate useful check.
+  A tribunal requires `tribune`, `refuter` and `tribunal-scribe`.
 - Agent `.md` formats, model names and permission declarations are not universally
   imported. Configure equivalent capabilities in the host assistant according to
   its documentation; otherwise use the contracts manually and disclose the gap.
 
 The [install guide](../INSTALL.md) gives tool/dependency details. CI exercises
 macOS, Linux and Windows helper paths; it does not provide live Codex evidence.
+
+## Create a small, portable workflow
+
+[Create your own](create-your-own.md) provides dependency-free starter skill,
+Claude-agent, and portable role-contract templates. They are examples to copy and
+adapt, not declarations of permissions or independent review.
