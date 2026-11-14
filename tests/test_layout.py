@@ -97,12 +97,50 @@ class LayoutFile(Project):
             self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertIn("bad layout entries", r.stderr)
 
+    def test_overlapping_folders_are_refused(self):
+        overlap = [{"notes": ".", "sources_md": "."}, {"notes": "."}, {"sources_md": "notes/lit2/src"},
+                   {"notes": "a", "search": "A/b"}, {"sources_pdf": "Src\\MD"}, {"search": "./src/md"}]
+        apart = [{"notes": "ab", "sources_md": "a"}, {"notes": "n", "sources_md": "nn"}]
+        for name in HELPER_COPIES:
+            mod = load(name)
+            for v in overlap:
+                (self.root / "provenote.json").write_text(json.dumps({**LAYOUT, **v}), encoding="utf-8")
+                with self.assertRaises(SystemExit, msg=f"{name}: {v} accepted") as cm:
+                    mod.find_layout(self.root)
+                self.assertIn("overlap", str(cm.exception))
+            for v in apart:
+                (self.root / "provenote.json").write_text(json.dumps({**LAYOUT, **v}), encoding="utf-8")
+                self.assertEqual(mod.find_layout(self.root)[0], self.root, f"{name}: {v} refused")
+
+    def test_a_note_cannot_be_its_own_source(self):
+        (self.root / "provenote.json").write_text(json.dumps({"notes": ".", "sources_md": "."}), encoding="utf-8")
+        own = self.root / "self.md"
+        own.write_text(NOTE.format(src=".").replace("./a.md", "self.md")
+                       + "<!-- page 1 -->\nMoney is a social convention that evolved over many centuries\n",
+                       encoding="utf-8")
+        for strict in ([], ["--strict"]):
+            r = run("verify-quotes", *strict, str(own), cwd=self.root)
+            self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("overlap", r.stderr)
+
 
 class VerifyQuotesLayout(Project):
     def test_custom_paths_pass(self):
         r = run("verify-quotes", str(self.note), cwd=self.root)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("PASS", r.stdout)
+
+    def test_nested_project_keeps_the_default_layout(self):
+        sub = self.root / "sub"  # a project inside the layout folder but outside its notes folder
+        (sub / "01_notes/lit").mkdir(parents=True)
+        (sub / "02_sources/md").mkdir(parents=True)
+        (sub / "02_sources/md/a.md").write_text(SOURCE, encoding="utf-8")
+        n = sub / "01_notes/lit/a.md"
+        n.write_text(NOTE.format(src="02_sources/md"), encoding="utf-8")
+        r = run("verify-quotes", str(n), cwd=self.root)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        n.write_text(NOTE.format(src="src/md"), encoding="utf-8")  # the outer layout's folder is not used
+        self.assertEqual(run("verify-quotes", str(n), cwd=self.root).returncode, 1)
 
     def test_layout_file_in_a_folder_above_is_not_read(self):
         r = run("verify-quotes", str(self.note), cwd=self.root / "draft")

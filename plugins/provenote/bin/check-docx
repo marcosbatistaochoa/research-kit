@@ -403,6 +403,7 @@ def main(argv):
     expected, verdicts = {r["quote_id"]: r for r in rows}, []
     seen = set()
     vq = load_vq(Path(__file__).with_name("verify-quotes"))
+    vq.PINNED_ROOT = os.path.abspath(root)  # --root pins the project: its provenote.json, never the cwd's
     for r in bindings:
         qid = r.get("quote_id", "")
         if qid in seen: verdicts.append((False, qid, "duplicate binding")); continue

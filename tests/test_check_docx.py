@@ -69,12 +69,12 @@ class CheckDocx(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
         return inv
 
-    def bindings(self, mutate=None):
+    def bindings(self, mutate=None, ref="02_sources/md/lei2023financial.md"):
         inv = self.inventory()
         with inv.open(encoding="utf-8") as f:
             rows = list(csv.DictReader(f))
         for r in rows:
-            r["source_md"], r["page"] = "02_sources/md/lei2023financial.md", "2"
+            r["source_md"], r["page"] = ref, "2"
         if mutate:
             mutate(rows)
         p = Path(self.t.name) / "bindings.csv"
@@ -91,6 +91,18 @@ class CheckDocx(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("QUOTE_MATCH", r.stdout)
         self.assertEqual(before, hashlib.sha256(self.doc.read_bytes()).hexdigest())
+
+    def test_root_layout_file_applies_from_any_working_directory(self):
+        (self.root / "src").mkdir()
+        shutil.move(str(self.root / "02_sources/md"), str(self.root / "src/md"))
+        shutil.move(str(self.root / "02_sources/manifest.csv"), str(self.root / "src/manifest.csv"))
+        (self.root / "provenote.json").write_text(
+            '{"sources_md": "src/md", "manifest": "src/manifest.csv"}', encoding="utf-8")
+        b = self.bindings(ref="src/md/lei2023financial.md")
+        self.assertNotEqual(Path.cwd().resolve(), self.root.resolve())
+        r = self.toolrun("--bindings", b)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("QUOTE_MATCH", r.stdout)
 
     def test_wrong_page_fake_stale_duplicate_and_missing_fail(self):
         for change in (

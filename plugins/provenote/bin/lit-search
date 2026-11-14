@@ -43,7 +43,8 @@ CAP = 20  # snowball cap per direction per seed
 # --- layout helper: keep identical in build-paper, check-bib, lit-search, pdf2md, verify-quotes ---
 # Optional layout file provenote.json in the project folder: keys below, paths relative to that folder.
 # No file: the default layout. Only the given folder's provenote.json is read, never one in a folder
-# above it. Unknown keys, absolute paths, Windows drive or root forms (C:x, \x) and ".." are refused.
+# above it. Unknown keys, absolute paths, Windows drive or root forms (C:x, \x) and ".." are refused,
+# and so are folders that overlap: notes, search, sources_md and sources_pdf each lie outside the others.
 LAYOUT = {"notes": "01_notes/lit", "search": "01_notes/search", "sources_md": "02_sources/md",
           "sources_pdf": "02_sources/pdf", "manifest": "02_sources/manifest.csv",
           "bib": "07_references/references.bib", "paper_dir": "10_paper"}
@@ -71,7 +72,25 @@ def find_layout(start="."):
     if bad:
         raise SystemExit(f"{f}: bad layout entries {bad}; allowed keys {sorted(LAYOUT)}, "
                          "each a relative path without a drive, a leading slash or '..'")
-    return d, {**LAYOUT, **data}
+    lay = {**LAYOUT, **data}
+    clash = overlapping(lay)
+    if clash:
+        raise SystemExit(f"{f}: layout folders {clash[0]} and {clash[1]} overlap; notes, search, "
+                         "sources_md and sources_pdf must each lie outside the others")
+    return d, lay
+
+
+def overlapping(lay):
+    """First pair of the folder keys whose paths are equal or nested, compared case-insensitively."""
+    from pathlib import PureWindowsPath
+    keys = ("notes", "search", "sources_md", "sources_pdf")
+    parts = {k: tuple(p.lower() for p in PureWindowsPath(lay[k]).parts if p != ".") for k in keys}
+    for i, a in enumerate(keys):
+        for b in keys[i + 1:]:
+            n = min(len(parts[a]), len(parts[b]))
+            if parts[a][:n] == parts[b][:n]:
+                return a, b
+    return None
 
 
 def layout_path(key, start="."):
